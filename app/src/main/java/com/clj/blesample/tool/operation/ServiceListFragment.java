@@ -2,13 +2,10 @@ package com.clj.blesample.tool.operation;
 
 import android.bluetooth.BluetoothGatt;
 import android.bluetooth.BluetoothGattService;
-import android.content.ComponentName;
 import android.content.Context;
-import android.content.Intent;
-import android.content.ServiceConnection;
 import android.os.Bundle;
-import android.os.IBinder;
-import android.support.v7.app.AppCompatActivity;
+import android.support.v4.app.Fragment;
+import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.AdapterView;
@@ -23,49 +20,56 @@ import java.util.ArrayList;
 import java.util.List;
 
 
-public class DeviceServiceActivity extends AppCompatActivity {
+public class ServiceListFragment extends Fragment {
 
-    private TextView txt_mac;
+    private TextView txt_name, txt_mac;
     private ResultAdapter mResultAdapter;
 
     private BluetoothService mBluetoothService;
 
     @Override
-    protected void onCreate(Bundle savedInstanceState) {
+    public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        setContentView(R.layout.activity_device_service);
-        initView();
-        bindFhrService();
+        mBluetoothService = ((OperationActivity) getActivity()).getBluetoothService();
     }
 
     @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        unbindFhrService();
+    public View onCreateView(LayoutInflater inflater, ViewGroup container, Bundle savedInstanceState) {
+        View v = inflater.inflate(R.layout.fragment_service_list, null);
+        initView(v);
+        showData();
+        return v;
     }
 
-    private void initView() {
+    private void initView(View v) {
+        txt_name = (TextView) v.findViewById(R.id.txt_name);
+        txt_mac = (TextView) v.findViewById(R.id.txt_mac);
 
-        txt_mac = (TextView) findViewById(R.id.txt_mac);
-
-        mResultAdapter = new ResultAdapter(this);
-        ListView listView_device = (ListView) findViewById(R.id.list_service);
+        mResultAdapter = new ResultAdapter(getActivity());
+        ListView listView_device = (ListView) v.findViewById(R.id.list_service);
         listView_device.setAdapter(mResultAdapter);
         listView_device.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             @Override
             public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
                 BluetoothGattService service = mResultAdapter.getItem(position);
-                if (mBluetoothService != null) {
-                    mBluetoothService.setService(service);
-                    startActivity(new Intent(DeviceServiceActivity.this, DeviceCharacteristicActivity.class));
-                }
+                mBluetoothService.setService(service);
+                ((OperationActivity) getActivity()).changePage(1);
             }
         });
     }
 
-    private void showData(String name, String mac, BluetoothGatt gatt) {
-        txt_mac.setText(mac);
+    private void showData() {
+        String name = mBluetoothService.getName();
+        String mac = mBluetoothService.getMac();
+        BluetoothGatt gatt = mBluetoothService.getGatt();
+//        txt_name.setText(String.valueOf("设备广播名：" + name));
+//        txt_mac.setText(String.valueOf("MAC地址: " + mac));
+
+        txt_name.setText(String.valueOf("设备广播名：" + "TEST-123"));
+        txt_mac.setText(String.valueOf("MAC地址: " + "5C:f8:21:ab:10:24"));
+
+        mResultAdapter.clear();
         for (final BluetoothGattService service : gatt.getServices()) {
             mResultAdapter.addResult(service);
         }
@@ -84,6 +88,10 @@ public class DeviceServiceActivity extends AppCompatActivity {
 
         public void addResult(BluetoothGattService service) {
             bluetoothGattServices.add(service);
+        }
+
+        public void clear() {
+            bluetoothGattServices.clear();
         }
 
         @Override
@@ -105,12 +113,12 @@ public class DeviceServiceActivity extends AppCompatActivity {
 
         @Override
         public View getView(int position, View convertView, ViewGroup parent) {
-            ResultAdapter.ViewHolder holder;
+            ViewHolder holder;
             if (convertView != null) {
-                holder = (ResultAdapter.ViewHolder) convertView.getTag();
+                holder = (ViewHolder) convertView.getTag();
             } else {
                 convertView = View.inflate(context, R.layout.adapter_service, null);
-                holder = new ResultAdapter.ViewHolder();
+                holder = new ViewHolder();
                 convertView.setTag(holder);
                 holder.txt_title = (TextView) convertView.findViewById(R.id.txt_title);
                 holder.txt_uuid = (TextView) convertView.findViewById(R.id.txt_uuid);
@@ -119,6 +127,7 @@ public class DeviceServiceActivity extends AppCompatActivity {
 
             BluetoothGattService service = bluetoothGattServices.get(position);
             String uuid = service.getUuid().toString();
+
             holder.txt_title.setText(String.valueOf("服务" + "（" + position + ")"));
             holder.txt_uuid.setText(uuid);
             holder.txt_type.setText("类型（主服务）");
@@ -131,31 +140,5 @@ public class DeviceServiceActivity extends AppCompatActivity {
             TextView txt_type;
         }
     }
-
-    private void bindFhrService() {
-        Intent bindIntent = new Intent(this, BluetoothService.class);
-        this.bindService(bindIntent, mFhrSCon, Context.BIND_AUTO_CREATE);
-    }
-
-    private void unbindFhrService() {
-        this.unbindService(mFhrSCon);
-    }
-
-    private ServiceConnection mFhrSCon = new ServiceConnection() {
-        @Override
-        public void onServiceConnected(ComponentName name, IBinder service) {
-            mBluetoothService = ((BluetoothService.BluetoothBinder) service).getService();
-            if (mBluetoothService != null)
-                showData(mBluetoothService.getName(),
-                        mBluetoothService.getMac(),
-                        mBluetoothService.getGatt());
-        }
-
-        @Override
-        public void onServiceDisconnected(ComponentName name) {
-            mBluetoothService = null;
-        }
-    };
-
 
 }
