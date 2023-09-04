@@ -97,16 +97,14 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
     @Override
     public void onClick(View v) {
-        switch (v.getId()) {
-            case R.id.btn_scan:
-                if (btn_scan.getText().equals(getString(R.string.start_scan))) {
-                    checkPermissions();
-                } else if (btn_scan.getText().equals(getString(R.string.stop_scan))) {
-                    BleManager.getInstance().cancelScan();
-                }
-                break;
-
-            case R.id.txt_setting:
+        if (v.getId() == R.id.btn_scan) {
+            if (btn_scan.getText().equals(getString(R.string.start_scan))) {
+                checkPermissions();
+            } else if (btn_scan.getText().equals(getString(R.string.stop_scan))) {
+                BleManager.getInstance().cancelScan();
+            }
+        }
+        else if (v.getId() == R.id.txt_setting) {
                 if (layout_setting.getVisibility() == View.VISIBLE) {
                     layout_setting.setVisibility(View.GONE);
                     txt_setting.setText(getString(R.string.expand_search_settings));
@@ -114,7 +112,6 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                     layout_setting.setVisibility(View.VISIBLE);
                     txt_setting.setText(getString(R.string.retrieve_search_settings));
                 }
-                break;
         }
     }
 
