@@ -49,9 +49,12 @@ import com.clj.fastble.scan.BleScanRuleConfig;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import android.speech.RecognitionListener;
+import android.speech.RecognizerIntent;
+import android.speech.SpeechRecognizer;
 
-
-public class MainActivity extends AppCompatActivity implements View.OnClickListener {
+public class MainActivity extends AppCompatActivity implements View.OnClickListener,
+        RecognitionListener {
 
     private static final String TAG = MainActivity.class.getSimpleName();
     private static final int REQUEST_CODE_OPEN_GPS = 1;
@@ -67,7 +70,11 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private Animation operatingAnim;
     private DeviceAdapter mDeviceAdapter;
     private ProgressDialog progressDialog;
-
+    private SpeechRecognizer speech = null;
+    private Intent recognizerIntent = null;
+    private String returnedText;
+    private String returnedError;
+    private static final int PERMISSIONS_REQUEST_RECORD_AUDIO = 1;
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -80,21 +87,52 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 .setReConnectCount(1, 5000)
                 .setConnectOverTime(20000)
                 .setOperateTimeout(5000);
+
+        // start speech recogniser
+        resetSpeechRecognizer();
+
+        // check for permission
+        int permissionCheck = ContextCompat.checkSelfPermission(getApplicationContext(), Manifest.permission.RECORD_AUDIO);
+        if (permissionCheck != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.RECORD_AUDIO}, PERMISSIONS_REQUEST_RECORD_AUDIO);
+            return;
+        }
+        if (recognizerIntent == null)
+            setRecogniserIntent();
+        speech.startListening(recognizerIntent);
     }
 
     @Override
     protected void onResume() {
         super.onResume();
         showConnectedDevice();
+        resetSpeechRecognizer();
+        if (recognizerIntent == null)
+            setRecogniserIntent();
+        speech.startListening(recognizerIntent);
     }
 
     @Override
     protected void onDestroy() {
+        if (speech != null) {
+            speech.stopListening();
+            speech.cancel();
+            speech.destroy();
+        }
         super.onDestroy();
         BleManager.getInstance().disconnectAllDevice();
         BleManager.getInstance().destroy();
     }
-
+    @Override
+    protected void onStop() {
+        Log.i(TAG, "stop");
+        super.onStop();
+        if (speech != null) {
+            speech.stopListening();
+            speech.cancel();
+            speech.destroy();
+        }
+    }
     @Override
     public void onClick(View v) {
         if (v.getId() == R.id.btn_scan) {
@@ -337,8 +375,15 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                     }
                 }
                 break;
+            case PERMISSIONS_REQUEST_RECORD_AUDIO:
+                if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                    speech.startListening(recognizerIntent);
+                } else {
+                    Toast.makeText(MainActivity.this, "Permission Denied!", Toast.LENGTH_SHORT).show();
+                    finish();
+                }
+            }
         }
-    }
 
     private void checkPermissions() {
         BluetoothAdapter bluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
@@ -414,4 +459,128 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         }
     }
 
+    @Override
+    public void onEvent(int arg0, Bundle arg1) {
+        Log.i(TAG, "onEvent");
+    }
+    @Override
+    public void onPartialResults(Bundle arg0) {
+        Log.i(TAG, "onPartialResults");
+    }
+
+    @Override
+    public void onReadyForSpeech(Bundle arg0) {
+        Log.i(TAG, "onReadyForSpeech");
+    }
+
+    @Override
+    public void onRmsChanged(float rmsdB) {
+        Log.i(TAG, "onRmsChanged: " + rmsdB);
+        //progressBar.setProgress((int) rmsdB);
+    }
+    @Override
+    public void onResults(Bundle results) {
+        Log.i(TAG, "onResults");
+        ArrayList<String> matches = results
+                .getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+        String text = "";
+        for (String result : matches)
+            text += result + "\n";
+
+        returnedText= text;
+        Log.d(TAG, "speech text: " + text);
+        sendOverBT(text);
+        speech.startListening(recognizerIntent);
+    }
+
+    // on change of bars write char
+    private void sendOverBT(String s) {
+
+    }
+    @Override
+    public void onError(int errorCode) {
+        String errorMessage = getErrorText(errorCode);
+        Log.i(TAG, "FAILED " + errorMessage);
+        returnedError = errorMessage;
+
+        // rest voice recogniser
+        resetSpeechRecognizer();
+        speech.startListening(recognizerIntent);
+    }
+    private void resetSpeechRecognizer() {
+
+        if(speech != null)
+            speech.destroy();
+        speech = SpeechRecognizer.createSpeechRecognizer(this);
+        Log.i(TAG, "isRecognitionAvailable: " + SpeechRecognizer.isRecognitionAvailable(this));
+        if(SpeechRecognizer.isRecognitionAvailable(this))
+            speech.setRecognitionListener(this);
+        else
+            finish();
+    }
+    private void setRecogniserIntent() {
+
+        recognizerIntent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+        recognizerIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE,
+                "en");
+        recognizerIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+        recognizerIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3);
+    }
+
+    public String getErrorText(int errorCode) {
+        String message;
+        switch (errorCode) {
+            case SpeechRecognizer.ERROR_AUDIO:
+                message = "Audio recording error";
+                break;
+            case SpeechRecognizer.ERROR_CLIENT:
+                message = "Client side error";
+                break;
+            case SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS:
+                message = "Insufficient permissions";
+                break;
+            case SpeechRecognizer.ERROR_NETWORK:
+                message = "Network error";
+                break;
+            case SpeechRecognizer.ERROR_NETWORK_TIMEOUT:
+                message = "Network timeout";
+                break;
+            case SpeechRecognizer.ERROR_NO_MATCH:
+                message = "No match";
+                break;
+            case SpeechRecognizer.ERROR_RECOGNIZER_BUSY:
+                message = "RecognitionService busy";
+                break;
+            case SpeechRecognizer.ERROR_SERVER:
+                message = "error from server";
+                break;
+            case SpeechRecognizer.ERROR_SPEECH_TIMEOUT:
+                message = "No speech input";
+                break;
+            default:
+                message = "Didn't understand, please try again.";
+                break;
+        }
+        return message;
+    }
+
+    @Override
+    public void onEndOfSpeech() {
+        Log.i(TAG, "onEndOfSpeech");
+        //progressBar.setIndeterminate(true);
+        speech.stopListening();
+    }
+
+    @Override
+    public void onBufferReceived(byte[] buffer) {
+        Log.i(TAG, "onBufferReceived: " + buffer);
+    }
+
+    @Override
+    public void onBeginningOfSpeech() {
+        Log.i(TAG, "onBeginningOfSpeech");
+        //progressBar.setIndeterminate(false);
+        //progressBar.setMax(10);
+    }
 }
