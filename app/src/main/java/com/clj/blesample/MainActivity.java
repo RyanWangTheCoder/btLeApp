@@ -42,10 +42,13 @@ import com.clj.fastble.callback.BleGattCallback;
 import com.clj.fastble.callback.BleMtuChangedCallback;
 import com.clj.fastble.callback.BleRssiCallback;
 import com.clj.fastble.callback.BleScanCallback;
+import com.clj.fastble.callback.BleWriteCallback;
 import com.clj.fastble.data.BleDevice;
 import com.clj.fastble.exception.BleException;
 import com.clj.fastble.scan.BleScanRuleConfig;
+import com.clj.fastble.utils.HexUtil;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -70,11 +73,14 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private Animation operatingAnim;
     private DeviceAdapter mDeviceAdapter;
     private ProgressDialog progressDialog;
+
+    // speech
     private SpeechRecognizer speech = null;
     private Intent recognizerIntent = null;
     private String returnedText;
     private String returnedError;
     private static final int PERMISSIONS_REQUEST_RECORD_AUDIO = 1;
+    private BleDevice mBleDevice = null;
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -126,12 +132,12 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     @Override
     protected void onStop() {
         Log.i(TAG, "stop");
-        super.onStop();
         if (speech != null) {
             speech.stopListening();
             speech.cancel();
             speech.destroy();
         }
+        super.onStop();
     }
     @Override
     public void onClick(View v) {
@@ -312,6 +318,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 progressDialog.dismiss();
                 mDeviceAdapter.addDevice(bleDevice);
                 mDeviceAdapter.notifyDataSetChanged();
+                mBleDevice = bleDevice;
             }
 
             @Override
@@ -475,7 +482,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
     @Override
     public void onRmsChanged(float rmsdB) {
-        Log.i(TAG, "onRmsChanged: " + rmsdB);
+        //Log.i(TAG, "onRmsChanged: " + rmsdB);
         //progressBar.setProgress((int) rmsdB);
     }
     @Override
@@ -495,7 +502,28 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
     // on change of bars write char
     private void sendOverBT(String s) {
+        Log.d("BT", "to TX " + s);
+        String HC06_RXTX = "0000ffe2-0000-1000-8000-00805f9b34fb";
+        String HC06_SERVICE_RXRX = "000ffe0-0000-1000-8000-00805f9b34fb";
+        String BLE33_RXTX = "00002a57-0000-1000-8000-00805f9b34fb";
+        String BLE33_SERVICE_RXTX = "0000180a-0000-1000-8000-00805f9b34fb";
+        if (mBleDevice != null && BleManager.getInstance().isConnected(mBleDevice)) {
+            BleManager.getInstance().write(
+                    mBleDevice,
+                    HC06_SERVICE_RXRX,
+                    HC06_RXTX,
+                    s.getBytes(StandardCharsets.UTF_8), //HexUtil.hexStringToBytes(s),
+                    new BleWriteCallback() {
 
+                        @Override
+                        public void onWriteSuccess(final int current, final int total, final byte[] justWrite) {
+                        }
+
+                        @Override
+                        public void onWriteFailure(final BleException exception) {
+                        }
+                    });
+        }
     }
     @Override
     public void onError(int errorCode) {

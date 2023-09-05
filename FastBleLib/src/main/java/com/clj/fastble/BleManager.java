@@ -47,6 +47,8 @@ public class BleManager {
     private MultipleBluetoothController multipleBluetoothController;
     private BluetoothManager bluetoothManager;
 
+    private BluetoothGattCharacteristic characteristic;
+
     public static final int DEFAULT_SCAN_TIME = 10000;
     private static final int DEFAULT_MAX_MULTIPLE_DEVICE = 7;
     private static final int DEFAULT_OPERATE_TIME = 5000;
@@ -83,7 +85,12 @@ public class BleManager {
             bleScanRuleConfig = new BleScanRuleConfig();
         }
     }
-
+    public void setCharacteristic(BluetoothGattCharacteristic characteristic) {
+        this.characteristic = characteristic;
+    }
+    public BluetoothGattCharacteristic getCharacteristic() {
+        return this.characteristic;
+    }
     /**
      * Get the Context
      *

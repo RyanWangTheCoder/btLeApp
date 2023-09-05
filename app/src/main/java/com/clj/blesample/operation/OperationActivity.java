@@ -164,6 +164,9 @@ public class OperationActivity extends AppCompatActivity implements Observer {
 
     public void setCharacteristic(BluetoothGattCharacteristic characteristic) {
         this.characteristic = characteristic;
+        //BleDevice bleDevice = ((OperationActivity) getActivity()).getBleDevice();
+        //BluetoothGattCharacteristic characteristic = ((OperationActivity) getActivity()).getCharacteristic();
+        BleManager.getInstance().setCharacteristic(characteristic);
     }
 
     public int getCharaProp() {

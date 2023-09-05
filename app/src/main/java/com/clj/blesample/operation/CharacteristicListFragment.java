@@ -8,6 +8,7 @@ import android.content.Context;
 import android.content.DialogInterface;
 import android.os.Build;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -78,6 +79,8 @@ public class CharacteristicListFragment extends Fragment {
                                     ((OperationActivity) getActivity()).setCharacteristic(characteristic);
                                     ((OperationActivity) getActivity()).setCharaProp(propList.get(which));
                                     ((OperationActivity) getActivity()).changePage(2);
+                                    Log.d("", "characteristic: " + characteristic.getUuid().toString());
+                                    Log.d("", "characteristic service: " + characteristic.getService().getUuid().toString());
                                 }
                             })
                             .show();
