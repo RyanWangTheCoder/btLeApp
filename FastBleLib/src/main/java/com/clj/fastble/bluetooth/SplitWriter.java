@@ -4,6 +4,7 @@ package com.clj.fastble.bluetooth;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Message;
+import android.util.Log;
 
 import com.clj.fastble.BleManager;
 import com.clj.fastble.callback.BleWriteCallback;
@@ -91,6 +92,7 @@ public class SplitWriter {
                         new BleWriteCallback() {
                             @Override
                             public void onWriteSuccess(int current, int total, byte[] justWrite) {
+                                Log.d("", "onWriteSuccess mTotalNum " + mTotalNum + " que size " + mDataQueue.size());
                                 int position = mTotalNum - mDataQueue.size();
                                 if (mCallback != null) {
                                     mCallback.onWriteSuccess(position, mTotalNum, justWrite);

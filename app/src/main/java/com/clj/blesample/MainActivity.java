@@ -491,11 +491,13 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         ArrayList<String> matches = results
                 .getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
         String text = "";
-        for (String result : matches)
-            text += result + "\n";
+        if (matches.size() > 0) text = matches.get(0);
+        //for (String result : matches)
+          //  text += result + "\n";
 
         returnedText= text;
         Log.d(TAG, "speech text: " + text);
+        Log.d(TAG, "speech text end");
         sendOverBT(text);
         speech.startListening(recognizerIntent);
     }
@@ -503,24 +505,27 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     // on change of bars write char
     private void sendOverBT(String s) {
         Log.d("BT", "to TX " + s);
-        String HC06_RXTX = "0000ffe2-0000-1000-8000-00805f9b34fb";
-        String HC06_SERVICE_RXRX = "000ffe0-0000-1000-8000-00805f9b34fb";
-        String BLE33_RXTX = "00002a57-0000-1000-8000-00805f9b34fb";
-        String BLE33_SERVICE_RXTX = "0000180a-0000-1000-8000-00805f9b34fb";
+        //String RXTX = "0000ffe2-0000-1000-8000-00805f9b34fb";
+        //String SERVICE_RXTX = "000ffe0-0000-1000-8000-00805f9b34fb";
+        String RXTX = "00002a57-0000-1000-8000-00805f9b34fb";
+        String SERVICE_RXTX = "0000180a-0000-1000-8000-00805f9b34fb";
         if (mBleDevice != null && BleManager.getInstance().isConnected(mBleDevice)) {
             BleManager.getInstance().write(
                     mBleDevice,
-                    HC06_SERVICE_RXRX,
-                    HC06_RXTX,
+                    SERVICE_RXTX,
+                    RXTX,
                     s.getBytes(StandardCharsets.UTF_8), //HexUtil.hexStringToBytes(s),
+                    //s.getBytes(),
                     new BleWriteCallback() {
 
                         @Override
                         public void onWriteSuccess(final int current, final int total, final byte[] justWrite) {
+                            Log.d("BT", "onWriteSuccess " + total);
                         }
 
                         @Override
                         public void onWriteFailure(final BleException exception) {
+                            Log.d("BT", "onWriteFailure " + exception);
                         }
                     });
         }

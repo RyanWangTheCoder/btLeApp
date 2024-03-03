@@ -11,6 +11,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
+import android.util.Log;
 
 import com.clj.fastble.BleManager;
 import com.clj.fastble.callback.BleIndicateCallback;
@@ -49,6 +50,7 @@ public class BleConnector {
                 switch (msg.what) {
 
                     case BleMsg.MSG_CHA_NOTIFY_START: {
+                        Log.d("", "MSG_CHA_NOTIFY_START");
                         BleNotifyCallback notifyCallback = (BleNotifyCallback) msg.obj;
                         if (notifyCallback != null)
                             notifyCallback.onNotifyFailure(new TimeoutException());
@@ -56,6 +58,7 @@ public class BleConnector {
                     }
 
                     case BleMsg.MSG_CHA_NOTIFY_RESULT: {
+                        Log.d("", "MSG_CHA_NOTIFY_RESULT");
                         notifyMsgInit();
 
                         BleNotifyCallback notifyCallback = (BleNotifyCallback) msg.obj;
@@ -72,6 +75,7 @@ public class BleConnector {
                     }
 
                     case BleMsg.MSG_CHA_NOTIFY_DATA_CHANGE: {
+                        Log.d("", "MSG_CHA_NOTIFY_DATA_CHANGE");
                         BleNotifyCallback notifyCallback = (BleNotifyCallback) msg.obj;
                         Bundle bundle = msg.getData();
                         byte[] value = bundle.getByteArray(BleMsg.KEY_NOTIFY_BUNDLE_VALUE);
@@ -82,6 +86,7 @@ public class BleConnector {
                     }
 
                     case BleMsg.MSG_CHA_INDICATE_START: {
+                        Log.d("", "MSG_CHA_INDICATE_START");
                         BleIndicateCallback indicateCallback = (BleIndicateCallback) msg.obj;
                         if (indicateCallback != null)
                             indicateCallback.onIndicateFailure(new TimeoutException());
@@ -89,6 +94,7 @@ public class BleConnector {
                     }
 
                     case BleMsg.MSG_CHA_INDICATE_RESULT: {
+                        Log.d("", "MSG_CHA_INDICATE_RESULT");
                         indicateMsgInit();
 
                         BleIndicateCallback indicateCallback = (BleIndicateCallback) msg.obj;
@@ -105,6 +111,7 @@ public class BleConnector {
                     }
 
                     case BleMsg.MSG_CHA_INDICATE_DATA_CHANGE: {
+                        Log.d("", "MSG_CHA_INDICATE_DATA_CHANGE");
                         BleIndicateCallback indicateCallback = (BleIndicateCallback) msg.obj;
                         Bundle bundle = msg.getData();
                         byte[] value = bundle.getByteArray(BleMsg.KEY_INDICATE_BUNDLE_VALUE);
@@ -115,6 +122,7 @@ public class BleConnector {
                     }
 
                     case BleMsg.MSG_CHA_WRITE_START: {
+                        Log.d("", "MSG_CHA_WRITE_START");
                         BleWriteCallback writeCallback = (BleWriteCallback) msg.obj;
                         if (writeCallback != null) {
                             writeCallback.onWriteFailure(new TimeoutException());
@@ -123,6 +131,7 @@ public class BleConnector {
                     }
 
                     case BleMsg.MSG_CHA_WRITE_RESULT: {
+                        Log.d("", "MSG_CHA_WRITE_RESULT");
                         writeMsgInit();
 
                         BleWriteCallback writeCallback = (BleWriteCallback) msg.obj;
@@ -140,6 +149,7 @@ public class BleConnector {
                     }
 
                     case BleMsg.MSG_CHA_READ_START: {
+                        Log.d("", "MSG_CHA_READ_START");
                         BleReadCallback readCallback = (BleReadCallback) msg.obj;
                         if (readCallback != null)
                             readCallback.onReadFailure(new TimeoutException());
@@ -147,6 +157,7 @@ public class BleConnector {
                     }
 
                     case BleMsg.MSG_CHA_READ_RESULT: {
+                        Log.d("", "MSG_CHA_READ_RESULT");
                         readMsgInit();
 
                         BleReadCallback readCallback = (BleReadCallback) msg.obj;
