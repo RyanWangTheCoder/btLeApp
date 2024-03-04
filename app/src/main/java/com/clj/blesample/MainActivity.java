@@ -59,8 +59,8 @@ import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
 
-public class MainActivity extends AppCompatActivity implements View.OnClickListener,
-        RecognitionListener {
+public class MainActivity extends AppCompatActivity implements View.OnClickListener {
+        //RecognitionListener {
 
     private static final String TAG = MainActivity.class.getSimpleName();
     private static final int REQUEST_CODE_OPEN_GPS = 1;
@@ -77,12 +77,13 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private DeviceAdapter mDeviceAdapter;
     private ProgressDialog progressDialog;
 
+    /*
     // speech
     private SpeechRecognizer speech = null;
     private Intent recognizerIntent = null;
     private String returnedText;
     private String returnedError;
-    private static final int PERMISSIONS_REQUEST_RECORD_AUDIO = 1;
+    private static final int PERMISSIONS_REQUEST_RECORD_AUDIO = 1; */
     private BleDevice mBleDevice = null;
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -96,9 +97,9 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 .setReConnectCount(1, 5000)
                 .setConnectOverTime(20000)
                 .setOperateTimeout(5000);
-
+/*
         // start speech recogniser
-        resetSpeechRecognizer();
+        //resetSpeechRecognizer();
 
         // check for permission
         int permissionCheck = ContextCompat.checkSelfPermission(getApplicationContext(), Manifest.permission.RECORD_AUDIO);
@@ -106,28 +107,35 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.RECORD_AUDIO}, PERMISSIONS_REQUEST_RECORD_AUDIO);
             return;
         }
+
         if (recognizerIntent == null)
             setRecogniserIntent();
-        speech.startListening(recognizerIntent);
+        speech.startListening(recognizerIntent); */
     }
 
     @Override
     protected void onResume() {
         super.onResume();
         showConnectedDevice();
+        /*
         resetSpeechRecognizer();
         if (recognizerIntent == null)
             setRecogniserIntent();
         speech.startListening(recognizerIntent);
+
+         */
     }
 
     @Override
     protected void onDestroy() {
+        /*
         if (speech != null) {
             speech.stopListening();
             speech.cancel();
             speech.destroy();
         }
+
+         */
         super.onDestroy();
         BleManager.getInstance().disconnectAllDevice();
         BleManager.getInstance().destroy();
@@ -135,11 +143,14 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     @Override
     protected void onStop() {
         Log.i(TAG, "stop");
+        /*
         if (speech != null) {
             speech.stopListening();
             speech.cancel();
             speech.destroy();
         }
+
+         */
         super.onStop();
     }
     @Override
@@ -322,6 +333,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 mDeviceAdapter.addDevice(bleDevice);
                 mDeviceAdapter.notifyDataSetChanged();
                 mBleDevice = bleDevice;
+                readOverBT();
             }
 
             @Override
@@ -385,13 +397,14 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                     }
                 }
                 break;
+                /*
             case PERMISSIONS_REQUEST_RECORD_AUDIO:
                 if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                     speech.startListening(recognizerIntent);
                 } else {
                     Toast.makeText(MainActivity.this, "Permission Denied!", Toast.LENGTH_SHORT).show();
                     finish();
-                }
+                }*/
             }
         }
 
@@ -468,54 +481,6 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             }
         }
     }
-
-    @Override
-    public void onEvent(int arg0, Bundle arg1) {
-        Log.i(TAG, "onEvent");
-    }
-    @Override
-    public void onPartialResults(Bundle arg0) {
-        Log.i(TAG, "onPartialResults");
-    }
-
-    @Override
-    public void onReadyForSpeech(Bundle arg0) {
-        Log.i(TAG, "onReadyForSpeech");
-        while(mBleDevice != null) {
-            //sendOverBT("hello, EMG sensor " + String.valueOf(counter));
-            readOverBT();
-            break;
-/*            try {
-                sleep(20);
-            } catch (InterruptedException e) {
-                System.out.println("I was interrupted!");
-                e.printStackTrace();
-            }*/
-        }
-    }
-
-    @Override
-    public void onRmsChanged(float rmsdB) {
-        //Log.i(TAG, "onRmsChanged: " + rmsdB);
-        //progressBar.setProgress((int) rmsdB);
-    }
-    @Override
-    public void onResults(Bundle results) {
-        Log.i(TAG, "onResults");
-        ArrayList<String> matches = results
-                .getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
-        String text = "";
-        if (matches.size() > 0) text = matches.get(0);
-        //for (String result : matches)
-          //  text += result + "\n";
-
-        returnedText= text;
-        Log.d(TAG, "speech text: " + text);
-        Log.d(TAG, "speech text end");
-        sendOverBT(text);
-        speech.startListening(recognizerIntent);
-    }
-
     // on change of bars write char
     private void sendOverBT(String s) {
         Log.d("BT", "to TX " + s);
@@ -559,9 +524,9 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                     new BleReadCallback() {
                         @Override
                         public void onReadSuccess(byte[] justRead) {
-                            Log.d("BT", "onReadSuccess " + justRead);
                             String readString = new String(justRead, StandardCharsets.UTF_8);
                             Log.d("results from BT RX: ", readString);
+                            readOverBT();
                         }
 
                         @Override
@@ -572,6 +537,54 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         }
         return readString;
     }
+/*
+    @Override
+    public void onEvent(int arg0, Bundle arg1) {
+        Log.i(TAG, "onEvent");
+    }
+    @Override
+    public void onPartialResults(Bundle arg0) {
+        Log.i(TAG, "onPartialResults");
+    }
+
+    @Override
+    public void onReadyForSpeech(Bundle arg0) {
+        Log.i(TAG, "onReadyForSpeech");
+        while(mBleDevice != null) {
+            //sendOverBT("hello, EMG sensor " + String.valueOf(counter));
+            readOverBT();
+            break;
+            try {
+                sleep(20);
+            } catch (InterruptedException e) {
+                System.out.println("I was interrupted!");
+                e.printStackTrace();
+            }
+        }
+    }
+
+    @Override
+    public void onRmsChanged(float rmsdB) {
+        //Log.i(TAG, "onRmsChanged: " + rmsdB);
+        //progressBar.setProgress((int) rmsdB);
+    }
+    @Override
+    public void onResults(Bundle results) {
+        Log.i(TAG, "onResults");
+        ArrayList<String> matches = results
+                .getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+        String text = "";
+        if (matches.size() > 0) text = matches.get(0);
+        //for (String result : matches)
+          //  text += result + "\n";
+
+        returnedText= text;
+        Log.d(TAG, "speech text: " + text);
+        Log.d(TAG, "speech text end");
+        sendOverBT(text);
+        speech.startListening(recognizerIntent);
+    }
+
     @Override
     public void onError(int errorCode) {
         String errorMessage = getErrorText(errorCode);
@@ -657,4 +670,6 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         //progressBar.setIndeterminate(false);
         //progressBar.setMax(10);
     }
+    */
+
 }

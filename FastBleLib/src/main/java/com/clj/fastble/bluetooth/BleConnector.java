@@ -422,7 +422,6 @@ public class BleConnector {
      * write
      */
     public void writeCharacteristic(byte[] data, BleWriteCallback bleWriteCallback, String uuid_write) {
-        Log.d("writeCharacteristic", uuid_write);
         if (data == null || data.length <= 0) {
             if (bleWriteCallback != null)
                 bleWriteCallback.onWriteFailure(new OtherException("the data to be written is empty"));

@@ -538,7 +538,6 @@ public class BleBluetooth {
 
         @Override
         public void onCharacteristicRead(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
-            Log.d("BleBluetooth", "onCharacteristicRead status" + String.valueOf(status));
             super.onCharacteristicRead(gatt, characteristic, status);
 
             Iterator iterator = bleReadCallbackHashMap.entrySet().iterator();
