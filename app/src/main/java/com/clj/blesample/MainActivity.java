@@ -1,5 +1,7 @@
 package com.clj.blesample;
 
+import static java.lang.Thread.sleep;
+
 import android.Manifest;
 import android.app.AlertDialog;
 import android.app.ProgressDialog;
@@ -40,6 +42,7 @@ import com.clj.blesample.operation.OperationActivity;
 import com.clj.fastble.BleManager;
 import com.clj.fastble.callback.BleGattCallback;
 import com.clj.fastble.callback.BleMtuChangedCallback;
+import com.clj.fastble.callback.BleReadCallback;
 import com.clj.fastble.callback.BleRssiCallback;
 import com.clj.fastble.callback.BleScanCallback;
 import com.clj.fastble.callback.BleWriteCallback;
@@ -334,7 +337,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                     Toast.makeText(MainActivity.this, getString(R.string.disconnected), Toast.LENGTH_LONG).show();
                     ObserverManager.getInstance().notifyObserver(bleDevice);
                 }
-
+                mBleDevice = null;
             }
         });
     }
@@ -478,6 +481,17 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     @Override
     public void onReadyForSpeech(Bundle arg0) {
         Log.i(TAG, "onReadyForSpeech");
+        while(mBleDevice != null) {
+            //sendOverBT("hello, EMG sensor " + String.valueOf(counter));
+            readOverBT();
+            break;
+/*            try {
+                sleep(20);
+            } catch (InterruptedException e) {
+                System.out.println("I was interrupted!");
+                e.printStackTrace();
+            }*/
+        }
     }
 
     @Override
@@ -506,14 +520,15 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private void sendOverBT(String s) {
         Log.d("BT", "to TX " + s);
         //String RXTX = "0000ffe2-0000-1000-8000-00805f9b34fb";
-        //String SERVICE_RXTX = "000ffe0-0000-1000-8000-00805f9b34fb";
-        String RXTX = "00002a57-0000-1000-8000-00805f9b34fb";
-        String SERVICE_RXTX = "0000180a-0000-1000-8000-00805f9b34fb";
+        //String SERVICE_TX = "000ffe0-0000-1000-8000-00805f9b34fb";
+        String TX           = "7def8317-7302-4ee6-8849-46face74ca2a";
+        //String SERVICE_TX = "00002a05-0000-1000-8000-00805f9b34fb";
+        String SERVICE_TX   = "7def8317-7300-4ee6-8849-46face74ca2a";
         if (mBleDevice != null && BleManager.getInstance().isConnected(mBleDevice)) {
             BleManager.getInstance().write(
                     mBleDevice,
-                    SERVICE_RXTX,
-                    RXTX,
+                    SERVICE_TX,
+                    TX,
                     s.getBytes(StandardCharsets.UTF_8), //HexUtil.hexStringToBytes(s),
                     //s.getBytes(),
                     new BleWriteCallback() {
@@ -529,6 +544,33 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                         }
                     });
         }
+    }
+    private String readOverBT() {
+        Log.d("BT", "to RX ");
+        String readString = "";
+        String RX           = "7def8317-7301-4ee6-8849-46face74ca2a";
+        String SERVICE_RX   = "7def8317-7300-4ee6-8849-46face74ca2a";
+        //String SERVICE_RX   = "00002902-0000-1000-8000-00805f9b34fb";
+        if (mBleDevice != null && BleManager.getInstance().isConnected(mBleDevice)) {
+            BleManager.getInstance().read(
+                    mBleDevice,
+                    SERVICE_RX,
+                    RX,
+                    new BleReadCallback() {
+                        @Override
+                        public void onReadSuccess(byte[] justRead) {
+                            Log.d("BT", "onReadSuccess " + justRead);
+                            String readString = new String(justRead, StandardCharsets.UTF_8);
+                            Log.d("results from BT RX: ", readString);
+                        }
+
+                        @Override
+                        public void onReadFailure(final BleException exception) {
+                            Log.d("BT", "onReadFailure " + exception);
+                        }
+                    });
+        }
+        return readString;
     }
     @Override
     public void onError(int errorCode) {
@@ -552,7 +594,6 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             finish();
     }
     private void setRecogniserIntent() {
-
         recognizerIntent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
         recognizerIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE,
                 "en");

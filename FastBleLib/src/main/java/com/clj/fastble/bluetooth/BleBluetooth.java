@@ -11,6 +11,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
+import android.util.Log;
 
 import com.clj.fastble.BleManager;
 import com.clj.fastble.callback.BleGattCallback;
@@ -537,6 +538,7 @@ public class BleBluetooth {
 
         @Override
         public void onCharacteristicRead(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
+            Log.d("BleBluetooth", "onCharacteristicRead status" + String.valueOf(status));
             super.onCharacteristicRead(gatt, characteristic, status);
 
             Iterator iterator = bleReadCallbackHashMap.entrySet().iterator();
@@ -554,6 +556,7 @@ public class BleBluetooth {
                             Bundle bundle = new Bundle();
                             bundle.putInt(BleMsg.KEY_READ_BUNDLE_STATUS, status);
                             bundle.putByteArray(BleMsg.KEY_READ_BUNDLE_VALUE, characteristic.getValue());
+                            //Log.d("BleBluetooth", "onCharacteristicRead " + characteristic.getValue());
                             message.setData(bundle);
                             handler.sendMessage(message);
                         }

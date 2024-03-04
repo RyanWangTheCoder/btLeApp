@@ -26,6 +26,7 @@ import com.clj.fastble.exception.GattException;
 import com.clj.fastble.exception.OtherException;
 import com.clj.fastble.exception.TimeoutException;
 
+import java.io.UnsupportedEncodingException;
 import java.util.UUID;
 
 
@@ -164,6 +165,13 @@ public class BleConnector {
                         Bundle bundle = msg.getData();
                         int status = bundle.getInt(BleMsg.KEY_READ_BUNDLE_STATUS);
                         byte[] value = bundle.getByteArray(BleMsg.KEY_READ_BUNDLE_VALUE);
+                        try {
+                            String rxStr = new String(value, "UTF-8");
+                            Log.d("", rxStr);
+                        } catch (UnsupportedEncodingException e) {
+                            System.out.println("I was interrupted!");
+                            e.printStackTrace();
+                        }
                         if (readCallback != null) {
                             if (status == BluetoothGatt.GATT_SUCCESS) {
                                 readCallback.onReadSuccess(value);
@@ -228,11 +236,19 @@ public class BleConnector {
     }
 
     private BleConnector withUUID(UUID serviceUUID, UUID characteristicUUID) {
+        Log.d("BleConnector serviceUUID", serviceUUID.toString());
+        Log.d("BleConnector characteristicUUID", characteristicUUID.toString());
         if (serviceUUID != null && mBluetoothGatt != null) {
             mGattService = mBluetoothGatt.getService(serviceUUID);
+            if (mGattService != null)
+                Log.d("BleConnector mGattService", mGattService.toString());
         }
         if (mGattService != null && characteristicUUID != null) {
             mCharacteristic = mGattService.getCharacteristic(characteristicUUID);
+            Log.d("BleConnector mCharacteristic", mCharacteristic.toString());
+        }
+        else {
+            Log.d("BleConnector", "null pointers");
         }
         return this;
     }
@@ -406,6 +422,7 @@ public class BleConnector {
      * write
      */
     public void writeCharacteristic(byte[] data, BleWriteCallback bleWriteCallback, String uuid_write) {
+        Log.d("writeCharacteristic", uuid_write);
         if (data == null || data.length <= 0) {
             if (bleWriteCallback != null)
                 bleWriteCallback.onWriteFailure(new OtherException("the data to be written is empty"));
@@ -436,9 +453,10 @@ public class BleConnector {
      * read
      */
     public void readCharacteristic(BleReadCallback bleReadCallback, String uuid_read) {
+        if (mCharacteristic != null) {
+        }
         if (mCharacteristic != null
                 && (mCharacteristic.getProperties() & BluetoothGattCharacteristic.PROPERTY_READ) > 0) {
-
             handleCharacteristicReadCallback(bleReadCallback, uuid_read);
             if (!mBluetoothGatt.readCharacteristic(mCharacteristic)) {
                 readMsgInit();
@@ -554,6 +572,7 @@ public class BleConnector {
     private void handleCharacteristicReadCallback(BleReadCallback bleReadCallback,
                                                   String uuid_read) {
         if (bleReadCallback != null) {
+            Log.d("BleConnector", "handleCharacteristicReadCallback");
             readMsgInit();
             bleReadCallback.setKey(uuid_read);
             bleReadCallback.setHandler(mHandler);

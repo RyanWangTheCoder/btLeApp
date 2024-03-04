@@ -35,6 +35,7 @@ import com.clj.fastble.scan.BleScanRuleConfig;
 import com.clj.fastble.scan.BleScanner;
 import com.clj.fastble.utils.BleLog;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.UUID;
 
@@ -616,6 +617,7 @@ public class BleManager {
                       long intervalBetweenTwoPackage,
                       BleWriteCallback callback) {
 
+        BleLog.e("BleManager: to write data: "+ (new String(data, StandardCharsets.UTF_8)));
         if (callback == null) {
             throw new IllegalArgumentException("BleWriteCallback can not be Null!");
         }
