@@ -162,6 +162,13 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 BleManager.getInstance().cancelScan();
             }
         }
+        else if (v.getId() == R.id.btn_monitor) {
+            if (mBleDevice != null) {
+                Intent intent = new Intent(MainActivity.this, OperationActivity.class);
+                intent.putExtra(OperationActivity.KEY_DATA, mBleDevice);
+                startActivity(intent);
+            }
+        }
         else if (v.getId() == R.id.txt_setting) {
                 if (layout_setting.getVisibility() == View.VISIBLE) {
                     layout_setting.setVisibility(View.GONE);
