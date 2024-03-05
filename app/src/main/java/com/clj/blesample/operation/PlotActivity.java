@@ -1,5 +1,9 @@
 package com.clj.blesample.operation;
 
+import android.os.Bundle;
+import android.util.Log;
+import android.view.View;
+
 import androidx.appcompat.app.AppCompatActivity;
 
 import com.clj.blesample.R;
@@ -10,10 +14,12 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Queue;
 import java.util.Timer;
-import com.clj.blesample.operation.EmgView;
-public class PlotActivity extends AppCompatActivity {
-    {
+import java.util.TimerTask;
 
+import com.clj.blesample.operation.EmgView;
+import com.clj.fastble.data.BleDevice;
+
+public class PlotActivity extends AppCompatActivity {
         private List<Integer> datas = new ArrayList<Integer>();
         private List<Integer> data1Datas = new ArrayList<Integer>();
 
@@ -21,15 +27,24 @@ public class PlotActivity extends AppCompatActivity {
         private Queue<Integer> data1Q = new LinkedList<Integer>();
 
         private int flag = 0;
+        public static final String KEY_DATA = "key_data";
+        private BleDevice bleDevice;
 
         @Override
         protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_main);
-        loadDatas();
-        simulator();
+            super.onCreate(savedInstanceState);
+            Log.d("", "onCreate");
+            setContentView(R.layout.activity_plot);
+            initData();
+            loadDatas();
+            simulator();
         }
+        private void initData() {
+            bleDevice = getIntent().getParcelableExtra(KEY_DATA);
+            if (bleDevice == null)
+                finish();
 
+        }
         /**
          * 模拟心电发送，心电数据是一秒500个包，所以
          */
@@ -64,8 +79,6 @@ public class PlotActivity extends AppCompatActivity {
             data0Q.addAll(datas);
             data1Q.addAll(datas);
         }catch (Exception e){}
-
-    }
 
     }
 }

@@ -39,6 +39,7 @@ import androidx.core.content.ContextCompat;
 import com.clj.blesample.adapter.DeviceAdapter;
 import com.clj.blesample.comm.ObserverManager;
 import com.clj.blesample.operation.OperationActivity;
+import com.clj.blesample.operation.PlotActivity;
 import com.clj.fastble.BleManager;
 import com.clj.fastble.callback.BleGattCallback;
 import com.clj.fastble.callback.BleMtuChangedCallback;
@@ -68,7 +69,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
     private LinearLayout layout_setting;
     private TextView txt_setting;
-    private Button btn_scan;
+    private Button btn_scan, btn_monitor;
     private EditText et_name, et_mac, et_uuid;
     private Switch sw_auto;
     private ImageView img_loading;
@@ -163,9 +164,11 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             }
         }
         else if (v.getId() == R.id.btn_monitor) {
-            if (mBleDevice != null) {
-                Intent intent = new Intent(MainActivity.this, OperationActivity.class);
-                intent.putExtra(OperationActivity.KEY_DATA, mBleDevice);
+            //if (mBleDevice != null)
+            Log.d("", "Monitor button clicked");
+            {
+                Intent intent = new Intent(getApplicationContext(), PlotActivity.class);
+                intent.putExtra(PlotActivity.KEY_DATA, mBleDevice);
                 startActivity(intent);
             }
         }
@@ -187,7 +190,9 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         btn_scan = (Button) findViewById(R.id.btn_scan);
         btn_scan.setText(getString(R.string.start_scan));
         btn_scan.setOnClickListener(this);
-
+        btn_monitor = (Button) findViewById(R.id.btn_monitor);
+        btn_monitor.setText(getString(R.string.start_monitor));
+        btn_monitor.setOnClickListener(this);
         et_name = (EditText) findViewById(R.id.et_name);
         et_mac = (EditText) findViewById(R.id.et_mac);
         et_uuid = (EditText) findViewById(R.id.et_uuid);

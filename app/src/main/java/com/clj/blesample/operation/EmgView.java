@@ -1,20 +1,38 @@
 package com.clj.blesample.operation;
 
-public class EmgView {
+import android.content.Context;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.Rect;
+import android.media.AudioManager;
+import android.media.SoundPool;
+import android.util.AttributeSet;
+import android.util.DisplayMetrics;
+import android.view.SurfaceHolder;
+import android.view.SurfaceView;
+
+import com.clj.blesample.R;
+
+import java.util.LinkedList;
+import java.util.NoSuchElementException;
+import java.util.Queue;
+
+public class EmgView extends SurfaceView implements SurfaceHolder.Callback {
         private Context mContext;
         private SurfaceHolder surfaceHolder;
         public static boolean isRunning;
         private Canvas mCanvas;
 
-        private float ecgMax = 4096;//心电的最大值
+        private float emgMax = 4096;//心电的最大值
         private String bgColor = "#3FB57D";
         private int wave_speed = 25;//波速: 25mm/s
         private int sleepTime = 8; //每次锁屏的时间间距，单位:ms
         private float lockWidth;//每次锁屏需要画的
-        private int ecgPerCount = 8;//每次画心电数据的个数，心电每秒有500个数据包
+        private int emgPerCount = 8;//每次画心电数据的个数，心电每秒有500个数据包
 
-        private static Queue<Integer> ecg0Datas = new LinkedList<Integer>();
-        private static Queue<Integer> ecg1Datas = new LinkedList<Integer>();
+        private static Queue<Integer> emg0Datas = new LinkedList<Integer>();
+        private static Queue<Integer> emg1Datas = new LinkedList<Integer>();
 
         private Paint mPaint;//画波形图的画笔
         private int mWidth;//控件宽度
@@ -26,13 +44,10 @@ public class EmgView {
         private Rect rect;
 
         private int startX;//每次画线的X坐标起点
-        private double ecgXOffset;//每次X坐标偏移的像素
+        private double emgXOffset;//每次X坐标偏移的像素
         private int blankLineWidth = 6;//右侧空白点的宽度
 
-        private static SoundPool soundPool;
-        private static int soundId;//心跳提示音
-
-    public EcgView(Context context, AttributeSet attrs){
+    public EmgView(Context context, AttributeSet attrs){
         super(context, attrs);
         this.mContext = context;
         this.surfaceHolder = getHolder();
@@ -46,13 +61,11 @@ public class EmgView {
         mPaint.setColor(Color.WHITE);
         mPaint.setStrokeWidth(6);
 
-        soundPool = new SoundPool(1, AudioManager.STREAM_RING, 0);
-        soundId = soundPool.load(mContext, R.raw.heartbeat, 1);
 
-        ecgXOffset = lockWidth / ecgPerCount;
+        emgXOffset = lockWidth / emgPerCount;
         startY0 = mHeight * (1 / 4);//波1初始Y坐标是控件高度的1/4
         startY1 = mHeight & (3 / 4);
-        ecgYRatio = mHeight / 2 / ecgMax;
+        ecgYRatio = mHeight / 2 / emgMax;
 
         yOffset1 = mHeight / 2;
     }
@@ -158,10 +171,10 @@ public class EmgView {
         private void drawWave0(){
         try{
             float mStartX = startX;
-            if(ecg0Datas.size() > ecgPerCount){
-                for(int i=0;i<ecgPerCount;i++){
-                    float newX = (float) (mStartX + ecgXOffset);
-                    int newY = ecgConver(ecg0Datas.poll());
+            if(emg0Datas.size() > emgPerCount){
+                for(int i=0;i<emgPerCount;i++){
+                    float newX = (float) (mStartX + emgXOffset);
+                    int newY = emgConver(emg0Datas.poll());
                     mCanvas.drawLine(mStartX, startY0, newX, newY, mPaint);
                     mStartX = newX;
                     startY0 = newY;
@@ -169,10 +182,10 @@ public class EmgView {
             }else{
                 /**
                  * 如果没有数据
-                 * 因为有数据一次画ecgPerCount个数，那么无数据时候就应该画ecgPercount倍数长度的中线
+                 * 因为有数据一次画emgPerCount个数，那么无数据时候就应该画emgPerCount倍数长度的中线
                  */
-                int newX = (int) (mStartX + ecgXOffset * ecgPerCount);
-                int newY = ecgConver((int) (ecgMax / 2));
+                int newX = (int) (mStartX + emgXOffset * emgPerCount);
+                int newY = emgConver((int) (emgMax / 2));
                 mCanvas.drawLine(mStartX, startY0, newX, newY, mPaint);
                 startY0 = newY;
             }
@@ -187,10 +200,10 @@ public class EmgView {
         private void drawWave1(){
         try{
             float mStartX = startX;
-            if(ecg1Datas.size() > ecgPerCount){
-                for(int i=0;i<ecgPerCount;i++){
-                    float newX = (float) (mStartX + ecgXOffset);
-                    int newY = ecgConver(ecg1Datas.poll()) + yOffset1;
+            if(emg1Datas.size() > emgPerCount){
+                for(int i=0;i<emgPerCount;i++){
+                    float newX = (float) (mStartX + emgXOffset);
+                    int newY = emgConver(emg1Datas.poll()) + yOffset1;
                     mCanvas.drawLine(mStartX, startY1, newX, newY, mPaint);
                     mStartX = newX;
                     startY1 = newY;
@@ -198,10 +211,10 @@ public class EmgView {
             }else{
                 /**
                  * 如果没有数据
-                 * 因为有数据一次画ecgPerCount个数，那么无数据时候就应该画ecgPercount倍数长度的中线
+                 * 因为有数据一次画emgPerCount个数，那么无数据时候就应该画emgPerCount倍数长度的中线
                  */
-                int newX = (int) (mStartX + ecgXOffset * ecgPerCount);
-                int newY = ecgConver((int) (ecgMax / 2)) + yOffset1;
+                int newX = (int) (mStartX + emgXOffset * emgPerCount);
+                int newY = emgConver((int) (emgMax / 2)) + yOffset1;
                 mCanvas.drawLine(mStartX, startY1, newX, newY, mPaint);
                 startY1 = newY;
             }
@@ -213,17 +226,17 @@ public class EmgView {
          * @param data
          * @return
          */
-        private int ecgConver(int data){
-        data = (int) (ecgMax - data);
+        private int emgConver(int data){
+        data = (int) (emgMax - data);
         data = (int) (data * ecgYRatio);
         return data;
     }
 
         public static void addEcgData0(int data){
-        ecg0Datas.add(data);
+        emg0Datas.add(data);
     }
 
         public static void addEcgData1(int data){
-        ecg1Datas.add(data);
+        emg1Datas.add(data);
     }
 }
