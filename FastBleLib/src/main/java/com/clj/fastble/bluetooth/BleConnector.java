@@ -158,7 +158,6 @@ public class BleConnector {
                     }
 
                     case BleMsg.MSG_CHA_READ_RESULT: {
-                        Log.d("", "MSG_CHA_READ_RESULT");
                         readMsgInit();
 
                         BleReadCallback readCallback = (BleReadCallback) msg.obj;
@@ -167,7 +166,7 @@ public class BleConnector {
                         byte[] value = bundle.getByteArray(BleMsg.KEY_READ_BUNDLE_VALUE);
                         try {
                             String rxStr = new String(value, "UTF-8");
-                            Log.d("", rxStr);
+                            //Log.d("", rxStr);
                         } catch (UnsupportedEncodingException e) {
                             System.out.println("I was interrupted!");
                             e.printStackTrace();
@@ -232,12 +231,11 @@ public class BleConnector {
                 }
             }
         };
-
     }
 
     private BleConnector withUUID(UUID serviceUUID, UUID characteristicUUID) {
-        Log.d("BleConnector serviceUUID", serviceUUID.toString());
-        Log.d("BleConnector characteristicUUID", characteristicUUID.toString());
+        //Log.d("BleConnector serviceUUID", serviceUUID.toString());
+        //Log.d("BleConnector characteristicUUID", characteristicUUID.toString());
         if (serviceUUID != null && mBluetoothGatt != null) {
             mGattService = mBluetoothGatt.getService(serviceUUID);
             if (mGattService != null)
@@ -245,7 +243,7 @@ public class BleConnector {
         }
         if (mGattService != null && characteristicUUID != null) {
             mCharacteristic = mGattService.getCharacteristic(characteristicUUID);
-            Log.d("BleConnector mCharacteristic", mCharacteristic.toString());
+            //Log.d("BleConnector mCharacteristic", mCharacteristic.toString());
         }
         else {
             Log.d("BleConnector", "null pointers");
@@ -571,7 +569,7 @@ public class BleConnector {
     private void handleCharacteristicReadCallback(BleReadCallback bleReadCallback,
                                                   String uuid_read) {
         if (bleReadCallback != null) {
-            Log.d("BleConnector", "handleCharacteristicReadCallback");
+            //Log.d("BleConnector", "handleCharacteristicReadCallback");
             readMsgInit();
             bleReadCallback.setKey(uuid_read);
             bleReadCallback.setHandler(mHandler);

@@ -345,7 +345,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 mDeviceAdapter.addDevice(bleDevice);
                 mDeviceAdapter.notifyDataSetChanged();
                 mBleDevice = bleDevice;
-                readOverBT();
+                //readOverBT();
             }
 
             @Override

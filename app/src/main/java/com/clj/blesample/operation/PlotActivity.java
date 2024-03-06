@@ -9,6 +9,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import com.clj.blesample.R;
 
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
@@ -17,7 +18,10 @@ import java.util.Timer;
 import java.util.TimerTask;
 
 import com.clj.blesample.operation.EmgView;
+import com.clj.fastble.BleManager;
+import com.clj.fastble.callback.BleReadCallback;
 import com.clj.fastble.data.BleDevice;
+import com.clj.fastble.exception.BleException;
 
 public class PlotActivity extends AppCompatActivity {
         private List<Integer> datas = new ArrayList<Integer>();
@@ -28,7 +32,7 @@ public class PlotActivity extends AppCompatActivity {
 
         private int flag = 0;
         public static final String KEY_DATA = "key_data";
-        private BleDevice bleDevice;
+        private BleDevice bleDevice = null;
 
         @Override
         protected void onCreate(Bundle savedInstanceState) {
@@ -36,8 +40,9 @@ public class PlotActivity extends AppCompatActivity {
             Log.d("", "onCreate");
             setContentView(R.layout.activity_plot);
             initData();
-            loadDatas();
-            simulator();
+            //loadDatas();
+            //simulator();
+            readOverBT();
         }
         private void initData() {
             bleDevice = getIntent().getParcelableExtra(KEY_DATA);
@@ -79,6 +84,38 @@ public class PlotActivity extends AppCompatActivity {
             data0Q.addAll(datas);
             data1Q.addAll(datas);
         }catch (Exception e){}
+    }
+    private void readOverBT() {
+        //Log.d("BT", "to RX ");
+        String RX           = "7def8317-7301-4ee6-8849-46face74ca2a";
+        String SERVICE_RX   = "7def8317-7300-4ee6-8849-46face74ca2a";
+        //String SERVICE_RX   = "00002902-0000-1000-8000-00805f9b34fb";
+        if (bleDevice != null && BleManager.getInstance().isConnected(bleDevice)) {
+            BleManager.getInstance().read(
+                    bleDevice,
+                    SERVICE_RX,
+                    RX,
+                    new BleReadCallback() {
+                        @Override
+                        public void onReadSuccess(byte[] justRead) {
+                            String rxStr = new String(justRead, StandardCharsets.UTF_8);
+                            Log.d("BT", "received: " + rxStr);
+                            String[] splited = rxStr.split(" ");
+                            int emgData = Integer.parseInt(splited[0]);
+                            int gsrData = emgData;
+                            if (splited.length == 2)
+                                gsrData = Integer.parseInt(splited[1]);
+                            EmgView.addEcgData0(emgData);
+                            EmgView.addEcgData1(gsrData);
+                            Log.d("BT", "read from BT again: ");
+                            readOverBT();
+                        }
 
+                        @Override
+                        public void onReadFailure(final BleException exception) {
+                            Log.d("BT", "onReadFailure " + exception);
+                        }
+                    });
+        }
     }
 }
