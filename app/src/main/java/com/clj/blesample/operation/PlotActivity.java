@@ -110,11 +110,12 @@ public class PlotActivity extends AppCompatActivity {
                             String rxStr = new String(justRead, StandardCharsets.UTF_8);
                             Log.d("BT", "received: " + rxStr);
                             String[] splited = rxStr.split(" ");
-                            int emgData = Integer.parseInt(splited[0]);
-                            int gsrData = emgData;
-                            if (splited.length == 2)
-                                gsrData = Integer.parseInt(splited[1]);
-                            EmgView.addEcgData0(emgData);
+                            int emgAggregatedCount = 4;
+                            for (int i = 0; i < emgAggregatedCount; i ++) {
+                                int emgData = Integer.parseInt(splited[i]);
+                                EmgView.addEcgData0(emgData);
+                            }
+                            int gsrData = Integer.parseInt(splited[emgAggregatedCount]);
                             EmgView.addEcgData1(gsrData);
                             Log.d("BT", "read from BT again: ");
                             readOverBT();
