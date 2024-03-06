@@ -79,7 +79,7 @@
         android:background="#eeeeee"
         android:padding="10dp" />
 
-    <AbsoluteLayout
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
@@ -101,6 +101,13 @@
             android:layout_y="23dp"
             android:text="@string/start_monitor" />
 
+        <CheckBox
+            android:id="@+id/demoCheckBox"
+            android:layout_width="37dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="DemoCheckBox" />
+
         <ImageView
             android:id="@+id/img_loading"
             android:layout_width="30dp"
@@ -111,7 +118,7 @@
             android:src="@mipmap/ic_loading"
             android:visibility="invisible" />
 
-    </AbsoluteLayout >
+    </LinearLayout >
 
     <ListView
         android:id="@+id/list_device"

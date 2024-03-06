@@ -22,6 +22,8 @@ import android.view.animation.Animation;
 import android.view.animation.AnimationUtils;
 import android.view.animation.LinearInterpolator;
 import android.widget.Button;
+import android.widget.CheckBox;
+import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -50,15 +52,11 @@ import com.clj.fastble.callback.BleWriteCallback;
 import com.clj.fastble.data.BleDevice;
 import com.clj.fastble.exception.BleException;
 import com.clj.fastble.scan.BleScanRuleConfig;
-import com.clj.fastble.utils.HexUtil;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
-import android.speech.RecognitionListener;
-import android.speech.RecognizerIntent;
-import android.speech.SpeechRecognizer;
 
 public class MainActivity extends AppCompatActivity implements View.OnClickListener {
         //RecognitionListener {
@@ -86,11 +84,33 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private String returnedError;
     private static final int PERMISSIONS_REQUEST_RECORD_AUDIO = 1; */
     private BleDevice mBleDevice = null;
+    private Boolean RadioButtonState = false;
+    private CheckBox checkBox;
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         initView();
+        checkBox = ( CheckBox ) findViewById( R.id.demoCheckBox );
+        checkBox.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener()
+        {
+            @Override
+            public void onCheckedChanged(CompoundButton buttonView, boolean isChecked)
+            {
+                if ( isChecked )
+                {
+                    // perform logic
+                    RadioButtonState = true;
+
+                }
+                else RadioButtonState = false;
+                Log.d("", "checkbox is " + RadioButtonState);
+            }
+        });
+        checkBox = (CheckBox) findViewById(R.id.demoCheckBox); // initiate a radio button
+        checkBox.setText("Demo"); // displayed text of radio button
+
+        checkBox.setChecked(true);
 
         BleManager.getInstance().init(getApplication());
         BleManager.getInstance()
@@ -168,7 +188,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             Log.d("", "Monitor button clicked");
             {
                 Intent intent = new Intent(getApplicationContext(), PlotActivity.class);
-                intent.putExtra(PlotActivity.KEY_DATA, mBleDevice);
+                if (RadioButtonState)
+                    intent.putExtra(PlotActivity.KEY_DATA, 0);
+                else
+                    intent.putExtra(PlotActivity.KEY_DATA, mBleDevice);
                 startActivity(intent);
             }
         }

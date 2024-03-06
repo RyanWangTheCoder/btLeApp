@@ -1,8 +1,10 @@
 package com.clj.blesample.operation;
 
 import android.os.Bundle;
+import android.provider.MediaStore;
 import android.util.Log;
 import android.view.View;
+import android.widget.RadioButton;
 
 import androidx.appcompat.app.AppCompatActivity;
 
@@ -33,21 +35,28 @@ public class PlotActivity extends AppCompatActivity {
         private int flag = 0;
         public static final String KEY_DATA = "key_data";
         private BleDevice bleDevice = null;
-
+        private Boolean demoMode = true;
         @Override
         protected void onCreate(Bundle savedInstanceState) {
             super.onCreate(savedInstanceState);
             Log.d("", "onCreate");
             setContentView(R.layout.activity_plot);
+
             initData();
-            //loadDatas();
-            //simulator();
-            readOverBT();
+            if (demoMode) {
+                loadDatas();
+                simulator();
+            }
+            else
+                readOverBT();
         }
         private void initData() {
             bleDevice = getIntent().getParcelableExtra(KEY_DATA);
             if (bleDevice == null)
-                finish();
+                demoMode = true;
+            else demoMode = false;
+            Log.d("", "demo mode " + demoMode);
+                //finish();
 
         }
         /**
@@ -118,4 +127,10 @@ public class PlotActivity extends AppCompatActivity {
                     });
         }
     }
+    @Override
+    public void onBackPressed() {
+            super.finish();
+            finish();
+    }
+
 }

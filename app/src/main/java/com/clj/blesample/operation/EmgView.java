@@ -24,12 +24,12 @@ public class EmgView extends SurfaceView implements SurfaceHolder.Callback {
         public static boolean isRunning;
         private Canvas mCanvas;
 
-        private float emgMax = 4096;//心电的最大值
+        private float emgMax = 500;//心电的最大值
         private String bgColor = "#3FB57D";
         private int wave_speed = 25;//波速: 25mm/s
         private int sleepTime = 8; //每次锁屏的时间间距，单位:ms
         private float lockWidth;//每次锁屏需要画的
-        private int emgPerCount = 8;//每次画心电数据的个数，心电每秒有500个数据包
+        private int emgPerCount = 1;//每次画心电数据的个数，心电每秒有500个数据包
 
         private static Queue<Integer> emg0Datas = new LinkedList<Integer>();
         private static Queue<Integer> emg1Datas = new LinkedList<Integer>();
