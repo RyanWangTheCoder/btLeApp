@@ -110,7 +110,7 @@ public class PlotActivity extends AppCompatActivity {
                             String rxStr = new String(justRead, StandardCharsets.UTF_8);
                             Log.d("BT", "received: " + rxStr);
                             String[] splited = rxStr.split(" ");
-                            int emgAggregatedCount = 4;
+                            int emgAggregatedCount = 1;
                             for (int i = 0; i < emgAggregatedCount; i ++) {
                                 int emgData = Integer.parseInt(splited[i]);
                                 EmgView.addEcgData0(emgData);
