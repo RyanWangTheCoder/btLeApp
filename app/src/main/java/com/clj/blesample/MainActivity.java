@@ -85,14 +85,14 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private static final int PERMISSIONS_REQUEST_RECORD_AUDIO = 1; */
     private BleDevice mBleDevice = null;
     private Boolean RadioButtonState = false;
-    private CheckBox checkBox;
+    //private CheckBox checkBox;
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         initView();
-        checkBox = ( CheckBox ) findViewById( R.id.demoCheckBox );
-        checkBox.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener()
+        //checkBox = ( CheckBox ) findViewById( R.id.demoCheckBox );
+/*        checkBox.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener()
         {
             @Override
             public void onCheckedChanged(CompoundButton buttonView, boolean isChecked)
@@ -110,7 +110,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         checkBox = (CheckBox) findViewById(R.id.demoCheckBox); // initiate a radio button
         checkBox.setText("Demo"); // displayed text of radio button
 
-        checkBox.setChecked(true);
+        checkBox.setChecked(true);*/
 
         BleManager.getInstance().init(getApplication());
         BleManager.getInstance()

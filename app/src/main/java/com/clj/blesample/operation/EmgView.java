@@ -63,8 +63,8 @@ public class EmgView extends SurfaceView implements SurfaceHolder.Callback {
 
 
         emgXOffset = lockWidth / emgPerCount;
-        startY0 = mHeight * (1 / 2);//波1初始Y坐标是控件高度的1/4
-        startY1 = mHeight & (4 / 5);
+        startY0 = mHeight * (1 / 4);//波1初始Y坐标是控件高度的1/4
+        startY1 = mHeight & (3 / 4);
         ecgYRatio = mHeight / 2 / emgMax;
 
         yOffset1 = mHeight / 2;

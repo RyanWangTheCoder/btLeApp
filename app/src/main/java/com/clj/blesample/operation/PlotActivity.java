@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Queue;
+import java.util.Random;
 import java.util.Timer;
 import java.util.TimerTask;
 
@@ -44,8 +45,8 @@ public class PlotActivity extends AppCompatActivity {
 
             initData();
             if (demoMode) {
-                loadDatas();
-                simulator();
+                    loadDatas();
+                    simulator();
             }
             else
                 readOverBT();
@@ -66,10 +67,13 @@ public class PlotActivity extends AppCompatActivity {
         new Timer().schedule(new TimerTask() {
             @Override
             public void run() {
+                Random random = new Random();
                 if(EmgView.isRunning){
                     if(data0Q.size() > 0){
-                        EmgView.addEcgData0(data0Q.poll());
-                        EmgView.addEcgData1(data1Q.poll());
+                        int tmp = data0Q.poll();
+                        Log.d("", "add " + String.valueOf(tmp));
+                        EmgView.addEcgData0(tmp);
+                        EmgView.addEcgData1(data1Q.poll()/10 * random.nextInt(10));
                     }
                 }
             }
@@ -87,6 +91,7 @@ public class PlotActivity extends AppCompatActivity {
             in.close();
             String[] data0s = data0.split(",");
             for(String str : data0s){
+                Log.d("", "load data " + str);
                 datas.add(Integer.parseInt(str));
             }
 
