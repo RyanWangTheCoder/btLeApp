@@ -4,6 +4,8 @@ import android.os.Bundle;
 import android.provider.MediaStore;
 import android.util.Log;
 import android.view.View;
+import android.widget.CheckBox;
+import android.widget.CompoundButton;
 import android.widget.RadioButton;
 import android.widget.TextView;
 
@@ -47,16 +49,21 @@ public class PlotActivity extends AppCompatActivity {
         private BleDevice bleDevice = null;
         private Boolean demoMode = true;
 
-        // UI elements for displaying features
-        private TextView txtRms, txtMnf, txtMdf, txtWaveletEntropy, txtSampleEntropy;
+        // UI elements for feature display
+        private TextView txtRms;
+        private TextView txtMnf;
+        private TextView txtMdf;
+        private TextView txtWaveletEntropy;
+        private TextView txtSampleEntropy;
+        private FeaturePlotView featurePlotView;
+        private CheckBox chkRms, chkMnf, chkMdf, chkWaveletEntropy, chkSampleEntropy;
         @Override
         protected void onCreate(Bundle savedInstanceState) {
             super.onCreate(savedInstanceState);
             Log.d("", "onCreate");
             setContentView(R.layout.activity_plot);
 
-            // Initialize UI elements
-            initViews();
+            initUI();
             initData();
             if (demoMode) {
                     loadDatas();
@@ -68,12 +75,66 @@ public class PlotActivity extends AppCompatActivity {
             // Start periodic feature extraction
             startFeatureExtraction();
         }
-        private void initViews() {
+        private void initUI() {
             txtRms = findViewById(R.id.txtRms);
             txtMnf = findViewById(R.id.txtMnf);
             txtMdf = findViewById(R.id.txtMdf);
             txtWaveletEntropy = findViewById(R.id.txtWaveletEntropy);
             txtSampleEntropy = findViewById(R.id.txtSampleEntropy);
+
+            featurePlotView = findViewById(R.id.featurePlotView);
+
+            chkRms = findViewById(R.id.chkRms);
+            chkMnf = findViewById(R.id.chkMnf);
+            chkMdf = findViewById(R.id.chkMdf);
+            chkWaveletEntropy = findViewById(R.id.chkWaveletEntropy);
+            chkSampleEntropy = findViewById(R.id.chkSampleEntropy);
+
+            // Setup checkbox listeners
+            chkRms.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+                        @Override
+                public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
+                    if (featurePlotView != null) {
+                        featurePlotView.setShowRms(isChecked);
+                    }
+                }
+            });
+
+            chkMnf.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+                        @Override
+                public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
+                    if (featurePlotView != null) {
+                        featurePlotView.setShowMnf(isChecked);
+                    }
+                }
+            });
+
+            chkMdf.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+                        @Override
+                public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
+                    if (featurePlotView != null) {
+                        featurePlotView.setShowMdf(isChecked);
+}
+        }
+            });
+
+            chkWaveletEntropy.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+                        @Override
+                public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
+                    if (featurePlotView != null) {
+                        featurePlotView.setShowWaveletEntropy(isChecked);
+                        }
+            }
+            });
+
+            chkSampleEntropy.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+                        @Override
+                public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
+                    if (featurePlotView != null) {
+                        featurePlotView.setShowSampleEntropy(isChecked);
+                    }
+                }
+            });
         }
                         @Override
         protected void onDestroy() {
@@ -81,12 +142,13 @@ public class PlotActivity extends AppCompatActivity {
             if (processingTimer != null) {
                 processingTimer.cancel();
                 processingTimer = null;
-            }
+}
             if (simulatorTimer != null) {
                 simulatorTimer.cancel();
                 simulatorTimer = null;
-            }
         }
+    }
+
         private void initData() {
             bleDevice = getIntent().getParcelableExtra(KEY_DATA);
             if (bleDevice == null)
@@ -114,8 +176,8 @@ public class PlotActivity extends AppCompatActivity {
                             rawEmgBuffer.add((double) tmp);
                                     if (rawEmgBuffer.size() > BUFFER_SIZE) {
                                         rawEmgBuffer.remove(0);
-                                    }
-                                }
+    }
+}
 
                         EmgView.addEcgData0(tmp);
                             EmgView.addEcgData1(tmp1 / 10 * random.nextInt(10));
@@ -175,11 +237,9 @@ public class PlotActivity extends AppCompatActivity {
                 0.25  // step size (seconds)
             );
 
-            // Step 3: Display features on UI
+            // Step 3: Log and display features
             if (features.rms.length > 0) {
                 final int lastIdx = features.rms.length - 1;
-
-                // Log features
                 Log.d("EMG_Features", String.format(
                     "Time: %.2fs | RMS: %.2f | MNF: %.2f Hz | MDF: %.2f Hz | WaveletEnt: %.3f | SampEnt: %.3f",
                     features.tCenterSec[lastIdx],
@@ -188,33 +248,64 @@ public class PlotActivity extends AppCompatActivity {
                     features.mdfHz[lastIdx],
                     features.waveletEntropy[lastIdx],
                     features.sampleEntropy[lastIdx]
-                ));
-
-                // Update UI on main thread
+                ));// Update UI on main thread
                 final EmgProcessor.FeatureSeries finalFeatures = features;
                 runOnUiThread(new Runnable() {
-                        @Override
+                    @Override
                     public void run() {
-                        if (txtRms != null) {
-                            txtRms.setText(String.format("RMS: %.2f", finalFeatures.rms[lastIdx]));
-                        }
-                        if (txtMnf != null) {
-                            txtMnf.setText(String.format("MNF: %.2f Hz", finalFeatures.mnfHz[lastIdx]));
-                        }
-                        if (txtMdf != null) {
-                            txtMdf.setText(String.format("MDF: %.2f Hz", finalFeatures.mdfHz[lastIdx]));
-                        }
-                        if (txtWaveletEntropy != null) {
-                            txtWaveletEntropy.setText(String.format("Wavelet Entropy: %.3f", finalFeatures.waveletEntropy[lastIdx]));
-                        }
-                        if (txtSampleEntropy != null) {
-                            txtSampleEntropy.setText(String.format("Sample Entropy: %.3f", finalFeatures.sampleEntropy[lastIdx]));
+                        updateFeatureUI(finalFeatures, lastIdx);
+                        // Update feature plot
+                        if (featurePlotView != null) {
+                            featurePlotView.addFeatureData(
+                                finalFeatures.rms[lastIdx],
+                                finalFeatures.mnfHz[lastIdx],
+                                finalFeatures.mdfHz[lastIdx],
+                                finalFeatures.waveletEntropy[lastIdx],
+                                finalFeatures.sampleEntropy[lastIdx]
+                            );
                         }
                     }
                 });
-
                 // TODO: Use features for classification, gesture recognition, etc.
                 // Example: if (features.rms[lastIdx] > THRESHOLD) { triggerAction(); }
+            }
+        }
+
+        private void updateFeatureUI(EmgProcessor.FeatureSeries features, int idx) {
+            if (txtRms != null) {
+                txtRms.setText(String.format("RMS: %.2f", features.rms[idx]));
+            }
+            if (txtMnf != null) {
+                double mnf = features.mnfHz[idx];
+                if (Double.isNaN(mnf)) {
+                    txtMnf.setText("MNF: --");
+                } else {
+                    txtMnf.setText(String.format("MNF: %.2f Hz", mnf));
+                }
+            }
+            if (txtMdf != null) {
+                double mdf = features.mdfHz[idx];
+                if (Double.isNaN(mdf)) {
+                    txtMdf.setText("MDF: --");
+                } else {
+                    txtMdf.setText(String.format("MDF: %.2f Hz", mdf));
+                }
+            }
+            if (txtWaveletEntropy != null) {
+                double went = features.waveletEntropy[idx];
+                if (Double.isNaN(went)) {
+                    txtWaveletEntropy.setText("Wavelet Entropy: --");
+                } else {
+                    txtWaveletEntropy.setText(String.format("Wavelet Entropy: %.3f", went));
+                }
+            }
+            if (txtSampleEntropy != null) {
+                double sampen = features.sampleEntropy[idx];
+                if (Double.isNaN(sampen) || Double.isInfinite(sampen)) {
+                    txtSampleEntropy.setText("Sample Entropy: --");
+                } else {
+                    txtSampleEntropy.setText(String.format("Sample Entropy: %.3f", sampen));
+                }
             }
         }
 
@@ -295,5 +386,4 @@ public class PlotActivity extends AppCompatActivity {
             super.finish();
             finish();
     }
-
 }
