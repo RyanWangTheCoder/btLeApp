@@ -8,26 +8,71 @@
     <com.clj.blesample.operation.EmgView
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="2"/>
+        android:layout_weight="3"/>
 
-    <View
-        android:layout_width="wrap_content"
-        android:layout_height="0dp"
-        android:layout_weight="1"></View>
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="12dp"
+        android:background="#F5F5F5">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="EMG Features"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:paddingBottom="8dp"/>
+
+        <TextView
+            android:id="@+id/txtRms"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="RMS: --"
+            android:textSize="14sp"/>
+
+        <TextView
+            android:id="@+id/txtMnf"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="MNF: -- Hz"
+            android:textSize="14sp"/>
+
+        <TextView
+            android:id="@+id/txtMdf"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="MDF: -- Hz"
+            android:textSize="14sp"/>
+
+        <TextView
+            android:id="@+id/txtWaveletEntropy"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Wavelet Entropy: --"
+            android:textSize="14sp"/>
+
+        <TextView
+            android:id="@+id/txtSampleEntropy"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Sample Entropy: --"
+            android:textSize="14sp"/>
+
+    </LinearLayout>
 
     <TextView
         android:id="@+id/ActivityTimeText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:ems="10"
-        android:inputType="text"
+        android:padding="8dp"
         android:text="Activity Time (minutes)" />
     <TextView
         android:id="@+id/InjuryRiskText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:ems="10"
+        android:padding="8dp"
         android:text="Probability of Injury: low" />
-
 
 </LinearLayout>

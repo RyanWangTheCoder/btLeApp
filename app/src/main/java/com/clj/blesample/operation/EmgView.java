@@ -63,9 +63,9 @@ public class EmgView extends SurfaceView implements SurfaceHolder.Callback {
 
 
         emgXOffset = lockWidth / emgPerCount;
-        startY0 = mHeight * (1 / 4);//波1初始Y坐标是控件高度的1/4
-        startY1 = mHeight & (3 / 4);
-        ecgYRatio = mHeight / 2 / emgMax;
+        startY0 = mHeight / 4;//波1初始Y坐标是控件高度的1/4
+        startY1 = mHeight * 3 / 4;//波2初始Y坐标是控件高度的3/4
+        ecgYRatio = mHeight / 2.0f / emgMax;
 
         yOffset1 = mHeight / 2;
     }
@@ -219,9 +219,7 @@ public class EmgView extends SurfaceView implements SurfaceHolder.Callback {
                 startY1 = newY;
             }
         }catch (NoSuchElementException e){}
-    }
-
-        /**
+    }/**
          * 将心电数据转换成用于显示的Y坐标
          * @param data
          * @return

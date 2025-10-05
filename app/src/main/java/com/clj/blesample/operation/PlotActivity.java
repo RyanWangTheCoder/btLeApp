@@ -5,10 +5,12 @@ import android.provider.MediaStore;
 import android.util.Log;
 import android.view.View;
 import android.widget.RadioButton;
+import android.widget.TextView;
 
 import androidx.appcompat.app.AppCompatActivity;
 
 import com.clj.blesample.R;
+import com.clj.blesample.processing.EmgProcessor;
 
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -33,16 +35,28 @@ public class PlotActivity extends AppCompatActivity {
         private Queue<Integer> data0Q = new LinkedList<Integer>();
         private Queue<Integer> data1Q = new LinkedList<Integer>();
 
+        // EMG Processing additions
+        private List<Double> rawEmgBuffer = new ArrayList<>();
+        private static final int BUFFER_SIZE = 2000; // 4 seconds at 500 Hz
+        private static final double SAMPLING_RATE = 500.0; // Hz
+        private Timer processingTimer;
+        private Timer simulatorTimer;
+
         private int flag = 0;
         public static final String KEY_DATA = "key_data";
         private BleDevice bleDevice = null;
         private Boolean demoMode = true;
+
+        // UI elements for displaying features
+        private TextView txtRms, txtMnf, txtMdf, txtWaveletEntropy, txtSampleEntropy;
         @Override
         protected void onCreate(Bundle savedInstanceState) {
             super.onCreate(savedInstanceState);
             Log.d("", "onCreate");
             setContentView(R.layout.activity_plot);
 
+            // Initialize UI elements
+            initViews();
             initData();
             if (demoMode) {
                     loadDatas();
@@ -50,6 +64,28 @@ public class PlotActivity extends AppCompatActivity {
             }
             else
                 readOverBT();
+
+            // Start periodic feature extraction
+            startFeatureExtraction();
+        }
+        private void initViews() {
+            txtRms = findViewById(R.id.txtRms);
+            txtMnf = findViewById(R.id.txtMnf);
+            txtMdf = findViewById(R.id.txtMdf);
+            txtWaveletEntropy = findViewById(R.id.txtWaveletEntropy);
+            txtSampleEntropy = findViewById(R.id.txtSampleEntropy);
+        }
+                        @Override
+        protected void onDestroy() {
+            super.onDestroy();
+            if (processingTimer != null) {
+                processingTimer.cancel();
+                processingTimer = null;
+            }
+            if (simulatorTimer != null) {
+                simulatorTimer.cancel();
+                simulatorTimer = null;
+            }
         }
         private void initData() {
             bleDevice = getIntent().getParcelableExtra(KEY_DATA);
@@ -59,26 +95,128 @@ public class PlotActivity extends AppCompatActivity {
             Log.d("", "demo mode " + demoMode);
                 //finish();
 
-        }
-        /**
+        }/**
          * 模拟心电发送，心电数据是一秒500个包，所以
          */
         private void simulator(){
-        new Timer().schedule(new TimerTask() {
-            @Override
-            public void run() {
+        simulatorTimer = new Timer();
+        simulatorTimer.schedule(new TimerTask() {
+                        @Override
+                public void run() {
                 Random random = new Random();
                 if(EmgView.isRunning){
                     if(data0Q.size() > 0){
-                        int tmp = data0Q.poll();
-                        Log.d("", "add " + String.valueOf(tmp));
+                        Integer tmp = data0Q.poll();
+                        Integer tmp1 = data1Q.poll();
+                        if (tmp != null && tmp1 != null) {
+                                // Collect raw data for processing
+                                synchronized (rawEmgBuffer) {
+                            rawEmgBuffer.add((double) tmp);
+                                    if (rawEmgBuffer.size() > BUFFER_SIZE) {
+                                        rawEmgBuffer.remove(0);
+                                    }
+                                }
+
                         EmgView.addEcgData0(tmp);
-                        EmgView.addEcgData1(data1Q.poll()/10 * random.nextInt(10));
-                    }
-                }
-            }
+                            EmgView.addEcgData1(tmp1 / 10 * random.nextInt(10));
+                        }
+                        }
+        }
+    }
         }, 0, 2);
     }
+
+        /**
+         * Periodic feature extraction (every 1 second)
+         */
+        private void startFeatureExtraction() {
+            processingTimer = new Timer();
+            processingTimer.schedule(new TimerTask() {
+                        @Override
+                public void run() {
+                    processEmgFeatures();
+}
+            }, 1000, 1000); // Run every 1 second
+        }
+
+        /**
+         * Process EMG features using EmgProcessor
+         */
+        private void processEmgFeatures() {
+            double[] rawData;
+            synchronized (rawEmgBuffer) {
+                if (rawEmgBuffer.size() < 500) {
+                    Log.d("EMG", "Not enough data for processing: " + rawEmgBuffer.size() + " samples");
+                    return;
+    }
+                // Convert List<Double> to double[]
+                rawData = new double[rawEmgBuffer.size()];
+                for (int i = 0; i < rawEmgBuffer.size(); i++) {
+                    rawData[i] = rawEmgBuffer.get(i);
+    }
+}
+
+            // Step 1: Preprocess (detrend, bandpass 20-450 Hz, notch 60 Hz)
+            double[] filtered = EmgProcessor.preprocess(
+                rawData,
+                SAMPLING_RATE,
+                20.0,    // bandpass low
+                450.0,   // bandpass high
+                60.0,    // notch frequency (mains)
+                30.0,    // notch Q
+                new int[]{2, 3}  // harmonics: 120 Hz, 180 Hz
+            );
+
+            // Step 2: Extract features (0.5s windows, 0.25s step)
+            EmgProcessor.FeatureSeries features = EmgProcessor.computeFeatures(
+                filtered,
+                SAMPLING_RATE,
+                0.5,  // window size (seconds)
+                0.25  // step size (seconds)
+            );
+
+            // Step 3: Display features on UI
+            if (features.rms.length > 0) {
+                final int lastIdx = features.rms.length - 1;
+
+                // Log features
+                Log.d("EMG_Features", String.format(
+                    "Time: %.2fs | RMS: %.2f | MNF: %.2f Hz | MDF: %.2f Hz | WaveletEnt: %.3f | SampEnt: %.3f",
+                    features.tCenterSec[lastIdx],
+                    features.rms[lastIdx],
+                    features.mnfHz[lastIdx],
+                    features.mdfHz[lastIdx],
+                    features.waveletEntropy[lastIdx],
+                    features.sampleEntropy[lastIdx]
+                ));
+
+                // Update UI on main thread
+                final EmgProcessor.FeatureSeries finalFeatures = features;
+                runOnUiThread(new Runnable() {
+                        @Override
+                    public void run() {
+                        if (txtRms != null) {
+                            txtRms.setText(String.format("RMS: %.2f", finalFeatures.rms[lastIdx]));
+                        }
+                        if (txtMnf != null) {
+                            txtMnf.setText(String.format("MNF: %.2f Hz", finalFeatures.mnfHz[lastIdx]));
+                        }
+                        if (txtMdf != null) {
+                            txtMdf.setText(String.format("MDF: %.2f Hz", finalFeatures.mdfHz[lastIdx]));
+                        }
+                        if (txtWaveletEntropy != null) {
+                            txtWaveletEntropy.setText(String.format("Wavelet Entropy: %.3f", finalFeatures.waveletEntropy[lastIdx]));
+                        }
+                        if (txtSampleEntropy != null) {
+                            txtSampleEntropy.setText(String.format("Sample Entropy: %.3f", finalFeatures.sampleEntropy[lastIdx]));
+                        }
+                    }
+                });
+
+                // TODO: Use features for classification, gesture recognition, etc.
+                // Example: if (features.rms[lastIdx] > THRESHOLD) { triggerAction(); }
+            }
+        }
 
         private void loadDatas(){
         try{
@@ -91,13 +229,23 @@ public class PlotActivity extends AppCompatActivity {
             in.close();
             String[] data0s = data0.split(",");
             for(String str : data0s){
-                Log.d("", "load data " + str);
-                datas.add(Integer.parseInt(str));
+                str = str.trim();
+                if (!str.isEmpty()) {
+                    try {
+                        int value = Integer.parseInt(str);
+                        datas.add(value);
+                    } catch (NumberFormatException nfe) {
+                        // Skip invalid data
+                    }
+                }
             }
 
             data0Q.addAll(datas);
             data1Q.addAll(datas);
-        }catch (Exception e){}
+            Log.d("PlotActivity", "Loaded " + datas.size() + " data points");
+        }catch (Exception e){
+            Log.e("PlotActivity", "Error loading data", e);
+        }
     }
     private void readOverBT() {
         //Log.d("BT", "to RX ");
@@ -118,18 +266,27 @@ public class PlotActivity extends AppCompatActivity {
                             int emgAggregatedCount = 1;
                             for (int i = 0; i < emgAggregatedCount; i ++) {
                                 int emgData = Integer.parseInt(splited[i]);
+
+                                // Collect raw data for processing
+                                synchronized (rawEmgBuffer) {
+                                    rawEmgBuffer.add((double) emgData);
+                                    if (rawEmgBuffer.size() > BUFFER_SIZE) {
+                                        rawEmgBuffer.remove(0);
+                        }
+        }
+
                                 EmgView.addEcgData0(emgData);
-                            }
+    }
                             int gsrData = Integer.parseInt(splited[emgAggregatedCount]);
                             EmgView.addEcgData1(gsrData);
                             Log.d("BT", "read from BT again: ");
                             readOverBT();
-                        }
+    }
 
                         @Override
                         public void onReadFailure(final BleException exception) {
                             Log.d("BT", "onReadFailure " + exception);
-                        }
+}
                     });
         }
     }
