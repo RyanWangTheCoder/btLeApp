@@ -41,6 +41,9 @@ public class BleConnector {
     private BleBluetooth mBleBluetooth;
     private Handler mHandler;
 
+    private long lastNotifyPrintMs = 0;
+    private int notifyPktCount = 0;
+
     BleConnector(BleBluetooth bleBluetooth) {
         this.mBleBluetooth = bleBluetooth;
         this.mBluetoothGatt = bleBluetooth.getBluetoothGatt();
@@ -80,6 +83,30 @@ public class BleConnector {
                         BleNotifyCallback notifyCallback = (BleNotifyCallback) msg.obj;
                         Bundle bundle = msg.getData();
                         byte[] value = bundle.getByteArray(BleMsg.KEY_NOTIFY_BUNDLE_VALUE);
+
+                        // ---- Debug print (rate-limited) ----
+                        notifyPktCount++;
+                        long now = android.os.SystemClock.uptimeMillis();
+                        if (value != null && now - lastNotifyPrintMs >= 1000) {   // 1 log per second
+                            lastNotifyPrintMs = now;
+
+                            // HEX
+                            StringBuilder hex = new StringBuilder();
+                            for (byte b : value) hex.append(String.format("%02X ", b));
+
+                            // ASCII (safe; may look garbled if binary)
+                            String ascii = new String(value, java.nio.charset.StandardCharsets.UTF_8);
+
+                            android.util.Log.e("BT_NOTIFY",
+                                    "LIB notify pkts=" + notifyPktCount +
+                                            " len=" + value.length +
+                                            " hex=" + hex);
+
+                            android.util.Log.e("BT_NOTIFY",
+                                    "LIB ascii='" + ascii.replace("\n","\\n").replace("\r","\\r") + "'");
+                        }
+
+                        // existing behavior
                         if (notifyCallback != null) {
                             notifyCallback.onCharacteristicChanged(value);
                         }

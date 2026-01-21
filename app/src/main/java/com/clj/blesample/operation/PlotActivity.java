@@ -27,6 +27,7 @@ import java.util.TimerTask;
 import com.clj.blesample.operation.EmgView;
 import com.clj.fastble.BleManager;
 import com.clj.fastble.callback.BleReadCallback;
+import com.clj.fastble.callback.BleNotifyCallback;
 import com.clj.fastble.data.BleDevice;
 import com.clj.fastble.exception.BleException;
 
@@ -49,6 +50,11 @@ public class PlotActivity extends AppCompatActivity {
         private BleDevice bleDevice = null;
         private Boolean demoMode = true;
 
+        // BLE UUIDs (custom UART-like service)
+        private static final String SERVICE_UUID = "7def8317-7300-4ee6-8849-46face74ca2a";
+        private static final String CHAR_UUID_NOTIFY = "7def8317-7301-4ee6-8849-46face74ca2a";
+
+
         // UI elements for feature display
         private TextView txtRms;
         private TextView txtMnf;
@@ -70,7 +76,7 @@ public class PlotActivity extends AppCompatActivity {
                     simulator();
             }
             else
-                readOverBT();
+                startNotifyOverBT();
 
             // Start periodic feature extraction
             startFeatureExtraction();
@@ -147,6 +153,11 @@ public class PlotActivity extends AppCompatActivity {
                 simulatorTimer.cancel();
                 simulatorTimer = null;
         }
+
+            // Stop BLE notifications to avoid leaking callbacks
+            if (!demoMode) {
+                stopNotifyOverBT();
+            }
     }
 
         private void initData() {
@@ -338,24 +349,62 @@ public class PlotActivity extends AppCompatActivity {
             Log.e("PlotActivity", "Error loading data", e);
         }
     }
-    private void readOverBT() {
-        //Log.d("BT", "to RX ");
-        String RX           = "7def8317-7301-4ee6-8849-46face74ca2a";
-        String SERVICE_RX   = "7def8317-7300-4ee6-8849-46face74ca2a";
-        //String SERVICE_RX   = "00002902-0000-1000-8000-00805f9b34fb";
-        if (bleDevice != null && BleManager.getInstance().isConnected(bleDevice)) {
-            BleManager.getInstance().read(
-                    bleDevice,
-                    SERVICE_RX,
-                    RX,
-                    new BleReadCallback() {
-                        @Override
-                        public void onReadSuccess(byte[] justRead) {
-                            String rxStr = new String(justRead, StandardCharsets.UTF_8);
-                            Log.d("BT", "received: " + rxStr);
-                            String[] splited = rxStr.split(" ");
+
+    private void startNotifyOverBT() {
+        // Data from the peripheral is streamed via NOTIFY (not READ).
+        Log.e("BT_NOTIFY", "startNotifyOverBT() called");
+        if (bleDevice == null) {
+            Log.w("BT", "bleDevice is null - cannot start notify");
+            return;
+        }
+        if (!BleManager.getInstance().isConnected(bleDevice)) {
+            Log.w("BT", "bleDevice not connected - cannot start notify");
+            return;
+        }
+
+        // Optional: dump discovered services/characteristics once for debugging
+        dumpGattOnce();
+
+        BleManager.getInstance().notify(
+                bleDevice,
+                SERVICE_UUID,
+                CHAR_UUID_NOTIFY,
+                new BleNotifyCallback() {
+                    @Override
+                    public void onNotifySuccess() {
+                        Log.i("BT", "Notify enabled on " + CHAR_UUID_NOTIFY);
+                    }
+
+                    @Override
+                    public void onNotifyFailure(final BleException exception) {
+                        Log.e("BT", "Notify enable failed: " + exception);
+                    }
+
+                    @Override
+                    public void onCharacteristicChanged(byte[] data) {
+
+                        if (data == null || data.length == 0) return;
+
+                        // 1) HEX dump (always reliable)
+                        StringBuilder hex = new StringBuilder();
+                        for (byte b : data) hex.append(String.format("%02X ", b));
+                        Log.d("BT_NOTIFY", "len=" + data.length + " hex=" + hex);
+
+                        // 2) ASCII dump (may include partial / weird chars, so sanitize)
+                        String ascii = new String(data, StandardCharsets.UTF_8);
+                        Log.d("BT_NOTIFY", "ascii='" + ascii.replace("\n","\\n").replace("\r","\\r") + "'");
+
+                        if (data == null || data.length == 0) return;
+
+                        // Current firmware sends ASCII numbers separated by spaces, e.g. "1234 56"
+                        String rxStr = new String(data, StandardCharsets.UTF_8).trim();
+                        if (rxStr.isEmpty()) return;
+                        Log.d("BT", "notify: " + rxStr);
+
+                        try {
+                            String[] splited = rxStr.split("\\s+");
                             int emgAggregatedCount = 1;
-                            for (int i = 0; i < emgAggregatedCount; i ++) {
+                            for (int i = 0; i < Math.min(emgAggregatedCount, splited.length); i++) {
                                 int emgData = Integer.parseInt(splited[i]);
 
                                 // Collect raw data for processing
@@ -363,24 +412,59 @@ public class PlotActivity extends AppCompatActivity {
                                     rawEmgBuffer.add((double) emgData);
                                     if (rawEmgBuffer.size() > BUFFER_SIZE) {
                                         rawEmgBuffer.remove(0);
-                        }
-        }
+                                    }
+                                }
 
                                 EmgView.addEcgData0(emgData);
-    }
-                            int gsrData = Integer.parseInt(splited[emgAggregatedCount]);
-                            EmgView.addEcgData1(gsrData);
-                            Log.d("BT", "read from BT again: ");
-                            readOverBT();
+                            }
+
+                            if (splited.length > emgAggregatedCount) {
+                                int gsrData = Integer.parseInt(splited[emgAggregatedCount]);
+                                EmgView.addEcgData1(gsrData);
+                            }
+                        } catch (Exception e) {
+                            Log.w("BT", "Failed to parse notify payload: ' " + rxStr + "'", e);
+                        }
+                    }
+                });
     }
 
-                        @Override
-                        public void onReadFailure(final BleException exception) {
-                            Log.d("BT", "onReadFailure " + exception);
-}
-                    });
+    private boolean gattDumped = false;
+    private void dumpGattOnce() {
+        if (gattDumped) return;
+        gattDumped = true;
+        try {
+            android.bluetooth.BluetoothGatt gatt = BleManager.getInstance().getBluetoothGatt(bleDevice);
+            if (gatt == null) {
+                Log.w("BT", "BluetoothGatt is null (services may not be discovered yet)");
+                return;
+            }
+            java.util.List<android.bluetooth.BluetoothGattService> services = gatt.getServices();
+            Log.i("BT", "Discovered services: " + (services == null ? 0 : services.size()));
+            if (services != null) {
+                for (android.bluetooth.BluetoothGattService s : services) {
+                    Log.i("BT", "  SVC " + s.getUuid());
+                    for (android.bluetooth.BluetoothGattCharacteristic c : s.getCharacteristics()) {
+                        int p = c.getProperties();
+                        Log.i("BT", "    CHR " + c.getUuid() + " props=0x" + Integer.toHexString(p));
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.w("BT", "dumpGattOnce failed", e);
         }
     }
+
+    private void stopNotifyOverBT() {
+        if (bleDevice == null) return;
+        try {
+            boolean ok = BleManager.getInstance().stopNotify(bleDevice, SERVICE_UUID, CHAR_UUID_NOTIFY);
+            Log.i("BT", "stopNotify: " + ok);
+        } catch (Exception e) {
+            Log.w("BT", "stopNotify exception", e);
+        }
+    }
+
     @Override
     public void onBackPressed() {
             super.finish();

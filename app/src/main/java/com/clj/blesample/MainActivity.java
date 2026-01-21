@@ -186,18 +186,17 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 BleManager.getInstance().cancelScan();
             }
         }
+
         else if (v.getId() == R.id.btn_monitor) {
-            //if (mBleDevice != null)
-            Log.d("", "Monitor button clicked");
-            {
-                Intent intent = new Intent(getApplicationContext(), PlotActivity.class);
-                if (RadioButtonState)
-                    intent.putExtra(PlotActivity.KEY_DATA, 0);
-                else
-                    intent.putExtra(PlotActivity.KEY_DATA, mBleDevice);
-                startActivity(intent);
+            if (mBleDevice == null || !BleManager.getInstance().isConnected(mBleDevice)) {
+                Toast.makeText(this, "Connect a device first", Toast.LENGTH_SHORT).show();
+                return;
             }
+            Intent intent = new Intent(getApplicationContext(), SessionCaptureActivity.class);
+            intent.putExtra("bleDevice", mBleDevice);
+            startActivity(intent);
         }
+
         else if (v.getId() == R.id.txt_setting) {
                 if (layout_setting.getVisibility() == View.VISIBLE) {
                     layout_setting.setVisibility(View.GONE);
@@ -391,8 +390,40 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 mDeviceAdapter.addDevice(bleDevice);
                 mDeviceAdapter.notifyDataSetChanged();
                 mBleDevice = bleDevice;
-                //readOverBT();
+
+                // 1) (Optional but helpful) request high connection priority
+                // Requires API 21+, FastBle already guards this.
+                BleManager.getInstance().requestConnectionPriority(
+                        bleDevice, BluetoothGatt.CONNECTION_PRIORITY_HIGH
+                );
+
+                // 2) Request MTU BEFORE you start streaming (notify)
+                BleManager.getInstance().setMtu(bleDevice, 247, new BleMtuChangedCallback() {
+                    @Override
+                    public void onMtuChanged(int mtu) {
+                        Log.e("BT", "MTU changed to " + mtu);
+
+                        // Now you can enable your “Start Session / Monitor” UI safely
+                        // (or enable notify here if you want streaming immediately)
+                        runOnUiThread(() -> {
+                            btn_monitor.setEnabled(true);   // if you have it
+                            // txtStatus.setText("Connected. MTU=" + mtu);
+                        });
+                    }
+
+                    @Override
+                    public void onSetMTUFailure(BleException exception) {
+                        Log.e("BT", "MTU request failed: " + exception);
+
+                        // You can still proceed, but you’ll be stuck at MTU=23 (notify payload=20 bytes)
+                        runOnUiThread(() -> {
+                            btn_monitor.setEnabled(true);
+                            // txtStatus.setText("Connected. MTU request failed.");
+                        });
+                    }
+                });
             }
+
 
             @Override
             public void onDisConnected(boolean isActiveDisConnected, BleDevice bleDevice, BluetoothGatt gatt, int status) {

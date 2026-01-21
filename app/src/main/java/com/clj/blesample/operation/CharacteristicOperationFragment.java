@@ -16,6 +16,7 @@ import android.widget.TextView;
 
 import androidx.fragment.app.Fragment;
 
+import com.clj.blesample.BuildConfig;
 import com.clj.blesample.R;
 import com.clj.fastble.BleManager;
 import com.clj.fastble.callback.BleIndicateCallback;
@@ -28,6 +29,7 @@ import com.clj.fastble.utils.HexUtil;
 
 import java.util.ArrayList;
 import java.util.List;
+import android.util.Log;
 
 @TargetApi(Build.VERSION_CODES.JELLY_BEAN_MR2)
 public class CharacteristicOperationFragment extends Fragment {
@@ -43,6 +45,7 @@ public class CharacteristicOperationFragment extends Fragment {
 
     @Override
     public View onCreateView(LayoutInflater inflater, ViewGroup container, Bundle savedInstanceState) {
+        Log.e("BT_NOTIFY", "CharacteristicOperationFragment loaded (build=" + BuildConfig.VERSION_NAME + ")");
         View v = inflater.inflate(R.layout.fragment_characteric_operation, null);
         initView(v);
         return v;
@@ -170,40 +173,53 @@ public class CharacteristicOperationFragment extends Fragment {
                     btn.setOnClickListener(new View.OnClickListener() {
                         @Override
                         public void onClick(View view) {
-                            String hex = et.getText().toString();
-                            if (TextUtils.isEmpty(hex)) {
-                                return;
+                            if (btn.getText().toString().equals(getActivity().getString(R.string.open_notification))) {
+                                btn.setText(getActivity().getString(R.string.close_notification));
+
+                                final String svcUuid = characteristic.getService().getUuid().toString();
+                                final String chrUuid = characteristic.getUuid().toString();
+
+                                Log.e("BT_NOTIFY", "Enabling notify: svc=" + svcUuid + " chr=" + chrUuid);
+
+                                BleManager.getInstance().notify(
+                                        bleDevice,
+                                        svcUuid,
+                                        chrUuid,
+                                        new BleNotifyCallback() {
+
+                                            @Override
+                                            public void onNotifySuccess() {
+                                                Log.e("BT_NOTIFY", "Notify SUCCESS: svc=" + svcUuid + " chr=" + chrUuid);
+                                            }
+
+                                            @Override
+                                            public void onNotifyFailure(final BleException exception) {
+                                                Log.e("BT_NOTIFY", "Notify FAIL: svc=" + svcUuid + " chr=" + chrUuid + " ex=" + exception);
+                                            }
+
+                                            @Override
+                                            public void onCharacteristicChanged(byte[] data) {
+                                                if (data == null) {
+                                                    Log.e("BT_NOTIFY", "CHANGED: svc=" + svcUuid + " chr=" + chrUuid + " data=null");
+                                                    return;
+                                                }
+
+                                                // ---- RAW dumps (HEX + ASCII) ----
+                                                StringBuilder hex = new StringBuilder();
+                                                for (byte b : data) hex.append(String.format("%02X ", b));
+                                                Log.e("BT_NOTIFY", "CHANGED: len=" + data.length + " hex=" + hex);
+
+                                                String ascii = new String(data, java.nio.charset.StandardCharsets.UTF_8);
+                                                Log.e("BT_NOTIFY", "CHANGED: ascii='" + ascii.replace("\n","\\n").replace("\r","\\r") + "'");
+
+                                                // Optional: if you still want your parsing, do it here
+                                                // parseAndPush(ascii);
+                                            }
+                                        }
+                                );
                             }
-                            BleManager.getInstance().write(
-                                    bleDevice,
-                                    characteristic.getService().getUuid().toString(),
-                                    characteristic.getUuid().toString(),
-                                    HexUtil.hexStringToBytes(hex),
-                                    new BleWriteCallback() {
-
-                                        @Override
-                                        public void onWriteSuccess(final int current, final int total, final byte[] justWrite) {
-                                            runOnUiThread(new Runnable() {
-                                                @Override
-                                                public void run() {
-                                                    addText(txt, "write success, current: " + current
-                                                            + " total: " + total
-                                                            + " justWrite: " + HexUtil.formatHexString(justWrite, true));
-                                                }
-                                            });
-                                        }
-
-                                        @Override
-                                        public void onWriteFailure(final BleException exception) {
-                                            runOnUiThread(new Runnable() {
-                                                @Override
-                                                public void run() {
-                                                    addText(txt, exception.toString());
-                                                }
-                                            });
-                                        }
-                                    });
                         }
+
                     });
                     layout_add.addView(view_add);
                 }
@@ -226,6 +242,9 @@ public class CharacteristicOperationFragment extends Fragment {
 
                                             @Override
                                             public void onNotifySuccess() {
+
+                                                Log.e("BT_NOTIFY", "Notify success for chr=");
+
                                                 runOnUiThread(new Runnable() {
                                                     @Override
                                                     public void run() {

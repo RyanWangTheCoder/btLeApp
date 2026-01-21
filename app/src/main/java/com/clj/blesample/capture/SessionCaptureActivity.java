@@ -1,5 +1,6 @@
 package com.clj.blesample.capture;
 
+import android.os.Build;
 import android.content.Intent;
 import android.os.Bundle;
 import android.os.Handler;
@@ -145,8 +146,14 @@ public class SessionCaptureActivity extends AppCompatActivity {
         emgPlot.setTitle("EMG (RAW / ENV / LPF(abs(RAW)))");
         imuPlot.setTitle("IMU acc magnitude + markers");
 
-        Object obj = getIntent().getSerializableExtra("bleDevice");
-        if (obj instanceof BleDevice) bleDevice = (BleDevice) obj;
+
+        if (Build.VERSION.SDK_INT >= 33) { // API 33+
+            //bleDevice = getIntent().getParcelableExtra("bleDevice", BleDevice.class);
+            bleDevice = getIntent().getParcelableExtra("bleDevice");
+        } else {
+            bleDevice = getIntent().getParcelableExtra("bleDevice");
+        }
+
 
         if (bleDevice == null) {
             txtStatus.setText("No BLE device. Connect first.");
@@ -236,6 +243,9 @@ public class SessionCaptureActivity extends AppCompatActivity {
                 NUS_TX_CHAR_UUID,
                 new BleNotifyCallback() {
                     @Override public void onNotifySuccess() {
+
+                        Log.e("BT_NOTIFY", "Notify success for chr=" + NUS_TX_CHAR_UUID);
+
                         runOnUiThread(() -> {
                             txtStatus.setText("Recording... (notify OK)");
                             startPingTimer();
