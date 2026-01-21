@@ -22,6 +22,7 @@ import com.clj.blesample.views.RingBufferF;
 import com.clj.blesample.views.SimplePlotView;
 import com.clj.fastble.BleManager;
 import com.clj.fastble.callback.BleNotifyCallback;
+import com.clj.fastble.callback.BleMtuChangedCallback;
 import com.clj.fastble.callback.BleWriteCallback;
 import com.clj.fastble.data.BleDevice;
 import com.clj.fastble.exception.BleException;
@@ -234,18 +235,34 @@ public class SessionCaptureActivity extends AppCompatActivity {
         btnProcessSession.setEnabled(false);
         btnStart.setEnabled(false);
         btnStop.setEnabled(true);
-        txtStatus.setText("Subscribing notify...");
+        txtStatus.setText("Requesting MTU...");
         startWorkerThreads();
 
+        // Request a larger MTU so ESP32 TLV frames are not truncated to 20 bytes
+        BleManager.getInstance().setMtu(bleDevice, 247, new BleMtuChangedCallback() {
+            @Override public void onMtuChanged(int mtu) {
+                Log.e("BT_NOTIFY", "MTU changed to " + mtu);
+                runOnUiThread(() -> txtStatus.setText("MTU=" + mtu + ", subscribing notify..."));
+                subscribeNotifyAndStartPing();
+            }
+            @Override public void onSetMTUFailure(BleException exception) {
+                Log.e("BT_NOTIFY", "MTU request failed: " + exception);
+                // Continue anyway; you will keep seeing 20-byte chunks if MTU stays 23
+                subscribeNotifyAndStartPing();
+            }
+        });
+    }
+
+
+    private void subscribeNotifyAndStartPing() {
+        txtStatus.setText("Requesting MTU...");
         BleManager.getInstance().notify(
                 bleDevice,
                 NUS_SERVICE_UUID,
                 NUS_TX_CHAR_UUID,
                 new BleNotifyCallback() {
                     @Override public void onNotifySuccess() {
-
                         Log.e("BT_NOTIFY", "Notify success for chr=" + NUS_TX_CHAR_UUID);
-
                         runOnUiThread(() -> {
                             txtStatus.setText("Recording... (notify OK)");
                             startPingTimer();

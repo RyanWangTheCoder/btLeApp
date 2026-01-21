@@ -87,6 +87,34 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private String returnedError;
     private static final int PERMISSIONS_REQUEST_RECORD_AUDIO = 1; */
     private BleDevice mBleDevice = null;
+
+    // MTU negotiation state (default ATT MTU=23 -> notify payload=20)
+    private volatile int negotiatedMtu = 23;
+
+    private void requestMtuWithRetry(final BleDevice device, final int mtu, final int attemptsLeft) {
+        Log.e("BT_NOTIFY", "Requesting MTU=" + mtu + " attemptsLeft=" + attemptsLeft);
+        BleManager.getInstance().setMtu(device, mtu, new BleMtuChangedCallback() {
+            @Override
+            public void onMtuChanged(int mtuResult) {
+                negotiatedMtu = mtuResult;
+                Log.e("BT_NOTIFY", "MTU changed to " + mtuResult);
+
+                // If MTU still low, retry a couple of times (some stacks need a short delay)
+                if (mtuResult <= 23 && attemptsLeft > 1) {
+                    getWindow().getDecorView().postDelayed(() -> requestMtuWithRetry(device, mtu, attemptsLeft - 1), 600);
+                }
+            }
+
+            @Override
+            public void onSetMTUFailure(BleException exception) {
+                Log.e("BT_NOTIFY", "MTU request failed: " + exception);
+                if (attemptsLeft > 1) {
+                    getWindow().getDecorView().postDelayed(() -> requestMtuWithRetry(device, mtu, attemptsLeft - 1), 600);
+                }
+            }
+        });
+    }
+
     private Boolean RadioButtonState = false;
     //private CheckBox checkBox;
     @Override
@@ -391,39 +419,18 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 mDeviceAdapter.notifyDataSetChanged();
                 mBleDevice = bleDevice;
 
-                // 1) (Optional but helpful) request high connection priority
-                // Requires API 21+, FastBle already guards this.
+                // Optional: request high connection priority (helps throughput)
                 BleManager.getInstance().requestConnectionPriority(
                         bleDevice, BluetoothGatt.CONNECTION_PRIORITY_HIGH
                 );
 
-                // 2) Request MTU BEFORE you start streaming (notify)
-                BleManager.getInstance().setMtu(bleDevice, 247, new BleMtuChangedCallback() {
-                    @Override
-                    public void onMtuChanged(int mtu) {
-                        Log.e("BT", "MTU changed to " + mtu);
+                // Request MTU BEFORE you start streaming (notify).
+                // Your ESP32 frames are >20 bytes; without MTU this phone will only receive 20-byte chunks.
+                requestMtuWithRetry(bleDevice, 247, 3);
 
-                        // Now you can enable your “Start Session / Monitor” UI safely
-                        // (or enable notify here if you want streaming immediately)
-                        runOnUiThread(() -> {
-                            btn_monitor.setEnabled(true);   // if you have it
-                            // txtStatus.setText("Connected. MTU=" + mtu);
-                        });
-                    }
-
-                    @Override
-                    public void onSetMTUFailure(BleException exception) {
-                        Log.e("BT", "MTU request failed: " + exception);
-
-                        // You can still proceed, but you’ll be stuck at MTU=23 (notify payload=20 bytes)
-                        runOnUiThread(() -> {
-                            btn_monitor.setEnabled(true);
-                            // txtStatus.setText("Connected. MTU request failed.");
-                        });
-                    }
-                });
+                // NOTE: We deliberately do NOT start notify/streaming here.
+                // Start notify in SessionCaptureActivity / PlotActivity after MTU is negotiated.
             }
-
 
             @Override
             public void onDisConnected(boolean isActiveDisConnected, BleDevice bleDevice, BluetoothGatt gatt, int status) {
