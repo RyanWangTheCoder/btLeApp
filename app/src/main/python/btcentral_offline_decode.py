@@ -25,7 +25,7 @@ from typing import Dict, Optional, Tuple, List
 import numpy as np
 
 # --- Binary protocol constants (match Arduino + btCentral.py) ---
-MAGIC = b"¥Z"
+MAGIC = b"\xA5Z"               # 0xA5 then ASCII 'Z' (
 HEADER_LEN = 14
 CRC_LEN = 2
 
