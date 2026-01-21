@@ -1,11 +1,13 @@
 package com.clj.blesample.capture;
 
+import android.content.Intent;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 import android.widget.Button;
 import android.widget.CompoundButton;
+import android.widget.SeekBar;
 import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -13,6 +15,7 @@ import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
 
 import com.clj.blesample.R;
+import com.clj.blesample.analysis.ProcessingActivity;
 import com.clj.blesample.views.MarkerBufferF;
 import com.clj.blesample.views.RingBufferF;
 import com.clj.blesample.views.SimplePlotView;
@@ -35,23 +38,14 @@ import java.util.Timer;
 import java.util.TimerTask;
 import java.util.concurrent.ArrayBlockingQueue;
 
-/**
- * Foreground recorder with aligned EMG/IMU plotting.
- *
- * - Logs raw notify payloads to frames.bin (len-prefixed).
- * - Parses frames on a background thread for plotting ONLY.
- * - Uses device time (dev_us) to align EMG and IMU on a shared x-axis.
- */
 public class SessionCaptureActivity extends AppCompatActivity {
 
     private static final String TAG = "SessionCapture";
 
-    // NUS UUIDs
     private static final String NUS_SERVICE_UUID = "6E400001-B5A3-F393-E0A9-E50E24DCCA9E";
     private static final String NUS_TX_CHAR_UUID = "6E400003-B5A3-F393-E0A9-E50E24DCCA9E";
     private static final String NUS_RX_CHAR_UUID = "6E400002-B5A3-F393-E0A9-E50E24DCCA9E";
 
-    // Protocol
     private static final int HEADER_LEN = 14;
     private static final int CRC_LEN = 2;
     private static final byte MAGIC0 = (byte)0xA5;
@@ -59,52 +53,45 @@ public class SessionCaptureActivity extends AppCompatActivity {
     private static final int TLV_EMG_BATCH = 0x01;
     private static final int TLV_IMU_BATCH = 0x02;
 
-    // Plot rates
     private static final int ENV_PLOT_HZ = 50;
-    private volatile int rawPlotHz = 500;  // can toggle to 250
+    private volatile int rawPlotHz = 500;
 
-    // UI
     private TextView txtStatus;
     private TextView txtStats;
     private Button btnStart;
     private Button btnStop;
+    private Button btnProcessSession;
     private Switch swFreeze;
     private Button btnWindow;
     private Button btnRawHz;
-
+    private TextView txtImuThr;
+    private SeekBar seekImuThr;
     private SimplePlotView emgPlot;
     private SimplePlotView imuPlot;
 
-    // Session
     private BleDevice bleDevice;
     private volatile boolean recording = false;
-
     private BufferedOutputStream out;
     private File sessionDir;
     private File framesFile;
     private long bytesWritten = 0;
     private long framesWritten = 0;
 
-    // Heartbeat
     private Timer pingTimer;
     private static final long PING_PERIOD_MS = 1000;
 
-    // Queues
     private final ArrayBlockingQueue<byte[]> qLog = new ArrayBlockingQueue<>(4096);
     private final ArrayBlockingQueue<byte[]> qPlot = new ArrayBlockingQueue<>(4096);
 
-    // Threads
     private Thread logThread;
     private Thread plotThread;
 
-    // Plot buffers (seconds)
-    private final RingBufferF emgRawBuf = new RingBufferF(12000);   // 20s @ 600Hz approx
-    private final RingBufferF emgEnvBuf = new RingBufferF(2000);    // 40s @ 50Hz
-    private final RingBufferF emgFiltBuf = new RingBufferF(2000);   // 40s @ 50Hz
-    private final RingBufferF imuBuf = new RingBufferF(3000);       // 60s @ 50Hz
+    private final RingBufferF emgRawBuf = new RingBufferF(12000);
+    private final RingBufferF emgEnvBuf = new RingBufferF(2000);
+    private final RingBufferF emgFiltBuf = new RingBufferF(2000);
+    private final RingBufferF imuBuf = new RingBufferF(3000);
     private final MarkerBufferF markers = new MarkerBufferF(500);
 
-    // Snapshot arrays (avoid allocations)
     private final float[] xs0 = new float[12000];
     private final float[] ys0 = new float[12000];
     private final float[] xs1 = new float[2000];
@@ -115,20 +102,17 @@ public class SessionCaptureActivity extends AppCompatActivity {
     private final float[] ysi = new float[3000];
     private final float[] tmk = new float[500];
 
-    // Time alignment
-    private volatile long t0SessionUs = -1; // first frame dev_us
+    private volatile long t0SessionUs = -1;
+    private long wrapCount = 0;
+    private long lastTFrameU32 = -1;
     private volatile float frozenNowSec = 0f;
-
-    // UI state
     private volatile boolean frozen = false;
-    private volatile float windowSec = 10f; // toggle 10/20
+    private volatile float windowSec = 10f;
 
-    // Marker detection
-    private volatile float imuThreshold = 20000f;  // raw magnitude threshold (tune)
+    private volatile float imuThreshold = 20000f;
     private volatile long lastMarkerUs = 0;
-    private static final long MARKER_DEBOUNCE_US = 300_000; // 300ms
+    private static final long MARKER_DEBOUNCE_US = 300_000;
 
-    // Filtered envelope (one-pole at ENV_PLOT_HZ)
     private float envLpf = 0f;
     private float envAlpha = alphaForCutoff(3.6f, ENV_PLOT_HZ);
 
@@ -136,7 +120,7 @@ public class SessionCaptureActivity extends AppCompatActivity {
     private final Runnable uiTick = new Runnable() {
         @Override public void run() {
             renderPlots();
-            ui.postDelayed(this, 33); // ~30 FPS
+            ui.postDelayed(this, 33);
         }
     };
 
@@ -149,9 +133,12 @@ public class SessionCaptureActivity extends AppCompatActivity {
         txtStats = findViewById(R.id.txtStats);
         btnStart = findViewById(R.id.btnStartSession);
         btnStop = findViewById(R.id.btnStopSession);
+        btnProcessSession = findViewById(R.id.btnProcessSession);
         swFreeze = findViewById(R.id.swFreeze);
         btnWindow = findViewById(R.id.btnWindow);
         btnRawHz = findViewById(R.id.btnRawHz);
+        txtImuThr = findViewById(R.id.txtImuThr);
+        seekImuThr = findViewById(R.id.seekImuThr);
         emgPlot = findViewById(R.id.emgPlot);
         imuPlot = findViewById(R.id.imuPlot);
 
@@ -165,6 +152,7 @@ public class SessionCaptureActivity extends AppCompatActivity {
             txtStatus.setText("No BLE device. Connect first.");
             btnStart.setEnabled(false);
             btnStop.setEnabled(false);
+            btnProcessSession.setEnabled(false);
             return;
         }
 
@@ -172,11 +160,12 @@ public class SessionCaptureActivity extends AppCompatActivity {
         btnStop.setOnClickListener(v -> stopSession());
         btnStop.setEnabled(false);
 
+        btnProcessSession.setEnabled(false);
+        btnProcessSession.setOnClickListener(v -> launchProcessThisSession());
+
         swFreeze.setOnCheckedChangeListener((CompoundButton b, boolean isChecked) -> {
             frozen = isChecked;
-            if (frozen) {
-                frozenNowSec = latestNowSec();
-            }
+            if (frozen) frozenNowSec = latestNowSec();
         });
 
         btnWindow.setOnClickListener(v -> {
@@ -192,8 +181,32 @@ public class SessionCaptureActivity extends AppCompatActivity {
         });
         btnRawHz.setText("RAW: 500Hz");
 
+        final int thrMin = 5000;
+        final int thrMax = 80000;
+        seekImuThr.setMax(thrMax - thrMin);
+        seekImuThr.setProgress((int)(imuThreshold - thrMin));
+        txtImuThr.setText("IMU marker threshold: " + (int)imuThreshold);
+        seekImuThr.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                imuThreshold = thrMin + progress;
+                txtImuThr.setText("IMU marker threshold: " + (int)imuThreshold);
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+
         txtStatus.setText("Ready. Connected=" + BleManager.getInstance().isConnected(bleDevice));
         ui.post(uiTick);
+    }
+
+    private void launchProcessThisSession() {
+        if (sessionDir == null) {
+            Toast.makeText(this, "No saved session yet", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Intent intent = new Intent(getApplicationContext(), ProcessingActivity.class);
+        intent.putExtra(ProcessingActivity.EXTRA_SESSION_DIR, sessionDir.getAbsolutePath());
+        startActivity(intent);
     }
 
     private void startSession() {
@@ -202,7 +215,6 @@ public class SessionCaptureActivity extends AppCompatActivity {
             Toast.makeText(this, "Device not connected", Toast.LENGTH_SHORT).show();
             return;
         }
-
         try {
             createSessionFiles();
             openOutput();
@@ -212,10 +224,10 @@ public class SessionCaptureActivity extends AppCompatActivity {
         }
 
         recording = true;
+        btnProcessSession.setEnabled(false);
         btnStart.setEnabled(false);
         btnStop.setEnabled(true);
         txtStatus.setText("Subscribing notify...");
-
         startWorkerThreads();
 
         BleManager.getInstance().notify(
@@ -223,35 +235,24 @@ public class SessionCaptureActivity extends AppCompatActivity {
                 NUS_SERVICE_UUID,
                 NUS_TX_CHAR_UUID,
                 new BleNotifyCallback() {
-                    @Override
-                    public void onNotifySuccess() {
+                    @Override public void onNotifySuccess() {
                         runOnUiThread(() -> {
                             txtStatus.setText("Recording... (notify OK)");
                             startPingTimer();
                         });
                     }
-
-                    @Override
-                    public void onNotifyFailure(BleException exception) {
+                    @Override public void onNotifyFailure(BleException exception) {
                         runOnUiThread(() -> {
                             txtStatus.setText("Notify failed: " + exception);
                             stopSession();
                         });
                     }
-
-                    @Override
-                    public void onCharacteristicChanged(byte[] data) {
+                    @Override public void onCharacteristicChanged(byte[] data) {
                         if (!recording) return;
-                        // fan-out to logger + plot decoder
-                        // clone to be safe across threads
                         byte[] a = data.clone();
                         byte[] b = data.clone();
-                        if (!qLog.offer(a)) {
-                            // if queue full, drop (should be rare)
-                        }
-                        if (!qPlot.offer(b)) {
-                            // drop plot only
-                        }
+                        qLog.offer(a);
+                        qPlot.offer(b);
                     }
                 }
         );
@@ -263,15 +264,12 @@ public class SessionCaptureActivity extends AppCompatActivity {
             btnStart.setEnabled(true);
             return;
         }
-
         recording = false;
         btnStop.setEnabled(false);
         btnStart.setEnabled(true);
 
         stopPingTimer();
-
         try { BleManager.getInstance().stopNotify(bleDevice, NUS_SERVICE_UUID, NUS_TX_CHAR_UUID); } catch (Exception ignored) {}
-
         stopWorkerThreads();
 
         try {
@@ -285,52 +283,41 @@ public class SessionCaptureActivity extends AppCompatActivity {
         try { writeMetaJson(); } catch (Exception e) { Log.w(TAG, "meta.json failed", e); }
 
         txtStatus.setText("Saved to: " + (sessionDir != null ? sessionDir.getAbsolutePath() : "(null)"));
+        btnProcessSession.setEnabled(sessionDir != null);
         updateStats();
     }
 
     private void startWorkerThreads() {
-        // logger
         logThread = new Thread(() -> {
             try {
                 while (recording || !qLog.isEmpty()) {
                     byte[] frame = qLog.poll();
-                    if (frame == null) {
-                        try { Thread.sleep(2); } catch (InterruptedException ignored) {}
-                        continue;
-                    }
+                    if (frame == null) { try { Thread.sleep(2); } catch (InterruptedException ignored) {} continue; }
                     writeFrameRecord(frame);
                 }
             } catch (Exception e) {
-                Log.e(TAG, "logThread error", e);
+                Log.e(TAG, "logThread", e);
             }
         }, "logThread");
         logThread.start();
 
-        // plot decoder
         plotThread = new Thread(() -> {
             try {
                 while (recording || !qPlot.isEmpty()) {
                     byte[] frame = qPlot.poll();
-                    if (frame == null) {
-                        try { Thread.sleep(2); } catch (InterruptedException ignored) {}
-                        continue;
-                    }
+                    if (frame == null) { try { Thread.sleep(2); } catch (InterruptedException ignored) {} continue; }
                     decodeForPlot(frame);
                 }
             } catch (Exception e) {
-                Log.e(TAG, "plotThread error", e);
+                Log.e(TAG, "plotThread", e);
             }
         }, "plotThread");
         plotThread.start();
     }
 
     private void stopWorkerThreads() {
-        try {
-            if (logThread != null) logThread.join(200);
-        } catch (Exception ignored) {}
-        try {
-            if (plotThread != null) plotThread.join(200);
-        } catch (Exception ignored) {}
+        try { if (logThread != null) logThread.join(200); } catch (Exception ignored) {}
+        try { if (plotThread != null) plotThread.join(200); } catch (Exception ignored) {}
         logThread = null;
         plotThread = null;
         qLog.clear();
@@ -364,9 +351,7 @@ public class SessionCaptureActivity extends AppCompatActivity {
                 ping,
                 new BleWriteCallback() {
                     @Override public void onWriteSuccess(int current, int total, byte[] justWrite) {}
-                    @Override public void onWriteFailure(BleException exception) {
-                        Log.w(TAG, "PING failed: " + exception);
-                    }
+                    @Override public void onWriteFailure(BleException exception) { Log.w(TAG, "PING failed: " + exception); }
                 }
         );
     }
@@ -384,6 +369,8 @@ public class SessionCaptureActivity extends AppCompatActivity {
         bytesWritten = 0;
         framesWritten = 0;
         t0SessionUs = -1;
+        wrapCount = 0;
+        lastTFrameU32 = -1;
         lastMarkerUs = 0;
     }
 
@@ -404,47 +391,52 @@ public class SessionCaptureActivity extends AppCompatActivity {
 
     private void updateStats() {
         txtStats.setText("frames=" + framesWritten + " bytes=" + bytesWritten +
-                "
-RAW=" + rawPlotHz + "Hz window=" + (int)windowSec + "s freeze=" + (frozen ? 1 : 0));
+                "RAW=" + rawPlotHz + "Hz window=" + (int)windowSec + "s freeze=" + (frozen ? 1 : 0));
     }
 
     private void writeMetaJson() throws IOException {
         if (sessionDir == null) return;
         File meta = new File(sessionDir, "meta.json");
-        String json = "{
-" +
-                "  "device_name": "" + (bleDevice.getName() != null ? bleDevice.getName() : "") + "",
-" +
-                "  "mac": "" + bleDevice.getMac() + "",
-" +
-                "  "frames_file": "frames.bin",
-" +
-                "  "frames_written": " + framesWritten + ",
-" +
-                "  "bytes_written": " + bytesWritten + "
-" +
-                "}
-";
+
+        String json =
+                "{\n" +
+                        "  \"device_name\": \"" + (bleDevice.getName() != null ? bleDevice.getName() : "") + "\",\n" +
+                        "  \"mac\": \"" + bleDevice.getMac() + "\",\n" +
+                        "  \"frames_file\": \"frames.bin\",\n" +
+                        "  \"frames_written\": " + framesWritten + ",\n" +
+                        "  \"bytes_written\": " + bytesWritten + "\n" +
+                        "}\n";
+
         try (FileOutputStream fos = new FileOutputStream(meta, false)) {
             fos.write(json.getBytes());
         }
     }
 
-    // ---------------- Plot decoding ----------------
+    private long extendDeviceUs(long tU32) {
+        long t = tU32 & 0xFFFFFFFFL;
+        if (lastTFrameU32 < 0) {
+            lastTFrameU32 = t;
+            return t;
+        }
+        if (t < lastTFrameU32 && (lastTFrameU32 - t) > 0x40000000L) {
+            wrapCount++;
+        }
+        lastTFrameU32 = t;
+        return (wrapCount << 32) + t;
+    }
 
     private void decodeForPlot(byte[] frame) {
         if (frame == null || frame.length < HEADER_LEN + CRC_LEN) return;
         if (frame[0] != MAGIC0 || frame[1] != MAGIC1) return;
         int flags = frame[3] & 0xFF;
 
-        long tFrameUs = u32le(frame, 8);
+        long tFrameUs = extendDeviceUs(u32le(frame, 8));
         if (t0SessionUs < 0) t0SessionUs = tFrameUs;
 
         int payloadLen = u16le(frame, 12);
         int totalLen = HEADER_LEN + payloadLen + CRC_LEN;
         if (payloadLen < 0 || totalLen > frame.length) return;
 
-        // CRC check (optional but cheap)
         if ((flags & 0x01) != 0) {
             int rxCrc = u16le(frame, totalLen - 2);
             int calc = crc16_ccitt(frame, 0, totalLen - 2);
@@ -458,13 +450,9 @@ RAW=" + rawPlotHz + "Hz window=" + (int)windowSec + "s freeze=" + (frozen ? 1 : 
             int tlvLen = u16le(frame, payloadOff + off + 1);
             off += 3;
             if (off + tlvLen > payloadLen) break;
-
             int valOff = payloadOff + off;
-            if (tlvType == TLV_EMG_BATCH) {
-                decodeEmgBatch(frame, valOff, tlvLen, tFrameUs);
-            } else if (tlvType == TLV_IMU_BATCH) {
-                decodeImuBatch(frame, valOff, tlvLen, tFrameUs);
-            }
+            if (tlvType == TLV_EMG_BATCH) decodeEmgBatch(frame, valOff, tlvLen, tFrameUs);
+            else if (tlvType == TLV_IMU_BATCH) decodeImuBatch(frame, valOff, tlvLen, tFrameUs);
             off += tlvLen;
         }
     }
@@ -483,7 +471,6 @@ RAW=" + rawPlotHz + "Hz window=" + (int)windowSec + "s freeze=" + (frozen ? 1 : 
 
         long t0Us = tFrameUs + t0Off;
         float stepUs = (srHz > 0) ? (1_000_000f / (float)srHz) : 0f;
-
         int rawDecim = Math.max(1, srHz / rawPlotHz);
         int envDecim = Math.max(1, srHz / ENV_PLOT_HZ);
 
@@ -496,12 +483,9 @@ RAW=" + rawPlotHz + "Hz window=" + (int)windowSec + "s freeze=" + (frozen ? 1 : 
             int raw = (ch >= 2) ? u16le(buf, base + 2) : 0;
 
             long seq = seq0 + i;
-            if ((seq % rawDecim) == 0) {
-                emgRawBuf.add(tSec, (float)raw);
-            }
+            if ((seq % rawDecim) == 0) emgRawBuf.add(tSec, (float)raw);
             if ((seq % envDecim) == 0) {
                 emgEnvBuf.add(tSec, (float)env);
-                // filtered envelope at env rate
                 float x = Math.abs((float)raw);
                 envLpf = envLpf + envAlpha * (x - envLpf);
                 emgFiltBuf.add(tSec, envLpf);
@@ -515,7 +499,7 @@ RAW=" + rawPlotHz + "Hz window=" + (int)windowSec + "s freeze=" + (frozen ? 1 : 
         short t0Off = (short)u16le(buf, valOff + 4);
         int srHz = u16le(buf, valOff + 6);
         int count = buf[valOff + 8] & 0xFF;
-        int metaLen = 14; // v2
+        int metaLen = 14;
         int sampOff = valOff + metaLen;
         int bytesPerSample = 12;
         if (count <= 0) return;
@@ -523,7 +507,6 @@ RAW=" + rawPlotHz + "Hz window=" + (int)windowSec + "s freeze=" + (frozen ? 1 : 
 
         long t0Us = tFrameUs + t0Off;
         float stepUs = (srHz > 0) ? (1_000_000f / (float)srHz) : 0f;
-
         int imuDecim = Math.max(1, srHz / ENV_PLOT_HZ);
 
         for (int i = 0; i < count; i++) {
@@ -534,14 +517,11 @@ RAW=" + rawPlotHz + "Hz window=" + (int)windowSec + "s freeze=" + (frozen ? 1 : 
             short ax = (short)u16le(buf, base);
             short ay = (short)u16le(buf, base + 2);
             short az = (short)u16le(buf, base + 4);
-
             float amag = (float)Math.sqrt((double)ax*ax + (double)ay*ay + (double)az*az);
 
             long seq = seq0 + i;
             if ((seq % imuDecim) == 0) {
                 imuBuf.add(tSec, amag);
-
-                // marker: upward crossing
                 if (amag >= imuThreshold && (devUs - lastMarkerUs) > MARKER_DEBOUNCE_US) {
                     markers.add(tSec);
                     lastMarkerUs = devUs;
@@ -549,8 +529,6 @@ RAW=" + rawPlotHz + "Hz window=" + (int)windowSec + "s freeze=" + (frozen ? 1 : 
             }
         }
     }
-
-    // ---------------- UI rendering ----------------
 
     private void renderPlots() {
         float nowSec = frozen ? frozenNowSec : latestNowSec();
@@ -563,7 +541,6 @@ RAW=" + rawPlotHz + "Hz window=" + (int)windowSec + "s freeze=" + (frozen ? 1 : 
         int nImu = imuBuf.snapshot(tMin, tMax, xsi, ysi);
         int nMk = markers.snapshot(tMin, tMax, tmk);
 
-        // EMG y-range: fixed 0..4095
         emgPlot.setViewport(tMin, tMax, 0f, 4095f);
         emgPlot.setSeries0(xs0, ys0, nRaw);
         emgPlot.setSeries1(xs1, ys1, nEnv);
@@ -571,7 +548,6 @@ RAW=" + rawPlotHz + "Hz window=" + (int)windowSec + "s freeze=" + (frozen ? 1 : 
         emgPlot.setMarkers(tmk, nMk);
         emgPlot.invalidate();
 
-        // IMU y-range: auto from window
         float imuMin = 0f, imuMax = 1f;
         if (nImu > 1) {
             imuMin = ysi[0]; imuMax = ysi[0];
@@ -591,7 +567,6 @@ RAW=" + rawPlotHz + "Hz window=" + (int)windowSec + "s freeze=" + (frozen ? 1 : 
         imuPlot.setMarkers(tmk, nMk);
         imuPlot.invalidate();
 
-        // update stats occasionally
         if ((framesWritten % 100) == 0) updateStats();
     }
 
@@ -600,8 +575,6 @@ RAW=" + rawPlotHz + "Hz window=" + (int)windowSec + "s freeze=" + (frozen ? 1 : 
         float b = imuBuf.latestX();
         return Math.max(a, b);
     }
-
-    // ---------------- helpers ----------------
 
     private static int u16le(byte[] b, int off) {
         return (b[off] & 0xFF) | ((b[off + 1] & 0xFF) << 8);
@@ -618,7 +591,7 @@ RAW=" + rawPlotHz + "Hz window=" + (int)windowSec + "s freeze=" + (frozen ? 1 : 
         int crc = 0xFFFF;
         for (int i = 0; i < len; i++) {
             crc ^= (data[off + i] & 0xFF) << 8;
-            for (int b = 0; b < 8; b++) {
+            for (int bb = 0; bb < 8; bb++) {
                 if ((crc & 0x8000) != 0) crc = ((crc << 1) ^ 0x1021) & 0xFFFF;
                 else crc = (crc << 1) & 0xFFFF;
             }
@@ -627,7 +600,6 @@ RAW=" + rawPlotHz + "Hz window=" + (int)windowSec + "s freeze=" + (frozen ? 1 : 
     }
 
     private static float alphaForCutoff(float cutoffHz, float fsHz) {
-        // One-pole LPF alpha = 1 - exp(-2*pi*fc/fs)
         return (float)(1.0 - Math.exp(-2.0 * Math.PI * (double)cutoffHz / (double)fsHz));
     }
 

@@ -19,8 +19,9 @@ import org.json.JSONObject;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/** Foreground post-processing screen (Phase-1). */
 public class ProcessingActivity extends AppCompatActivity {
+    public static final String EXTRA_SESSION_DIR = "session_dir";
+
     private ProgressBar progressBar;
     private TextView txtStage;
     private TextView txtOutput;
@@ -31,6 +32,8 @@ public class ProcessingActivity extends AppCompatActivity {
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private volatile boolean cancelled = false;
 
+    private String sessionDir;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -40,6 +43,8 @@ public class ProcessingActivity extends AppCompatActivity {
         txtOutput = findViewById(R.id.txtOutput);
         btnStart = findViewById(R.id.btnStart);
         btnCancel = findViewById(R.id.btnCancel);
+
+        sessionDir = getIntent().getStringExtra(EXTRA_SESSION_DIR);
 
         progressBar.setIndeterminate(false);
         progressBar.setMax(100);
@@ -55,8 +60,7 @@ public class ProcessingActivity extends AppCompatActivity {
     }
 
     private void appendOut(String s) {
-        mainHandler.post(() -> txtOutput.append(s + "
-"));
+        mainHandler.post(() -> txtOutput.append(s + "\n"));
     }
 
     private void startProcessing() {
@@ -73,8 +77,15 @@ public class ProcessingActivity extends AppCompatActivity {
                 Python py = Python.getInstance();
                 PyObject mod = py.getModule("analysis_bridge");
                 if (cancelled) return;
-                setStage("Running demo...", 40);
-                PyObject res = mod.callAttr("run_demo");
+
+                PyObject res;
+                if (sessionDir != null && !sessionDir.isEmpty()) {
+                    setStage("Processing saved session...", 40);
+                    res = mod.callAttr("process_session", sessionDir);
+                } else {
+                    setStage("Running demo...", 40);
+                    res = mod.callAttr("run_demo");
+                }
                 if (cancelled) return;
                 setStage("Done", 100);
                 JSONObject obj = new JSONObject(res.toString());

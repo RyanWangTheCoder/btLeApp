@@ -41,6 +41,13 @@
             android:text="Stop &amp; Save" />
     </LinearLayout>
 
+    <Button
+        android:id="@+id/btnProcessSession"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:text="Process this session" />
+
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -67,6 +74,21 @@
             android:layout_marginStart="8dp"
             android:text="RAW: 500Hz" />
     </LinearLayout>
+
+    <TextView
+        android:id="@+id/txtImuThr"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:textSize="12sp"
+        android:text="IMU marker threshold: 20000" />
+
+    <SeekBar
+        android:id="@+id/seekImuThr"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:max="75000"
+        android:progress="15000" />
 
     <TextView
         android:id="@+id/txtStats"

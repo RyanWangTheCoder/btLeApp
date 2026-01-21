@@ -70,6 +70,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private LinearLayout layout_setting;
     private TextView txt_setting;
     private Button btn_scan, btn_monitor;
+    private Button btn_process, btn_record;
     private EditText et_name, et_mac, et_uuid;
     private Switch sw_auto;
     private ImageView img_loading;
@@ -206,6 +207,20 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                     txt_setting.setText(getString(R.string.retrieve_search_settings));
                 }
         }
+        else if (v.getId() == R.id.btn_process) {
+            Intent intent = new Intent(getApplicationContext(), ProcessingActivity.class);
+            startActivity(intent);
+        }
+        else if (v.getId() == R.id.btn_record) {
+            if (mBleDevice == null) {
+                Toast.makeText(this, "No device connected", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            Intent intent = new Intent(getApplicationContext(), SessionCaptureActivity.class);
+            intent.putExtra("bleDevice", mBleDevice);  // SessionCaptureActivity expects "bleDevice"
+            startActivity(intent);
+        }
+
     }
 
     private void initView() {

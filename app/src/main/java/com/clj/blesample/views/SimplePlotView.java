@@ -9,16 +9,12 @@ import android.view.View;
 
 import androidx.annotation.Nullable;
 
-/** Simple time-series plot view with optional markers. */
 public class SimplePlotView extends View {
-
     private final Paint gridPaint = new Paint();
-    private final Paint axisPaint = new Paint();
     private final Paint[] linePaints = new Paint[3];
     private final Paint markerPaint = new Paint();
     private final Paint textPaint = new Paint();
 
-    // Data snapshots (provided by activity)
     private float[] x0, y0, x1, y1, x2, y2;
     private int n0, n1, n2;
     private float[] markers;
@@ -32,42 +28,30 @@ public class SimplePlotView extends View {
     public SimplePlotView(Context c, @Nullable AttributeSet a) { super(c, a); init(); }
 
     private void init() {
+        setBackgroundColor(0xFF101418);
         gridPaint.setColor(0x22FFFFFF);
         gridPaint.setStrokeWidth(1f);
-
-        axisPaint.setColor(0x66FFFFFF);
-        axisPaint.setStrokeWidth(2f);
-
         int[] colors = new int[]{ Color.CYAN, Color.YELLOW, Color.MAGENTA };
         for (int i = 0; i < 3; i++) {
             linePaints[i] = new Paint();
             linePaints[i].setColor(colors[i]);
-            linePaints[i].setStrokeWidth(2.0f);
-            linePaints[i].setStyle(Paint.Style.STROKE);
+            linePaints[i].setStrokeWidth(2f);
             linePaints[i].setAntiAlias(true);
         }
-
         markerPaint.setColor(0x88FF4444);
         markerPaint.setStrokeWidth(2f);
-
         textPaint.setColor(Color.WHITE);
-        textPaint.setTextSize(32f);
+        textPaint.setTextSize(30f);
         textPaint.setAntiAlias(true);
-
-        setBackgroundColor(0xFF101418);
     }
 
     public void setTitle(String t) { this.title = t; }
-
     public void setViewport(float tMin, float tMax, float yMin, float yMax) {
-        this.tMin = tMin; this.tMax = tMax;
-        this.yMin = yMin; this.yMax = yMax;
+        this.tMin = tMin; this.tMax = tMax; this.yMin = yMin; this.yMax = yMax;
     }
-
     public void setSeries0(float[] x, float[] y, int n) { this.x0 = x; this.y0 = y; this.n0 = n; }
     public void setSeries1(float[] x, float[] y, int n) { this.x1 = x; this.y1 = y; this.n1 = n; }
     public void setSeries2(float[] x, float[] y, int n) { this.x2 = x; this.y2 = y; this.n2 = n; }
-
     public void setMarkers(float[] t, int n) { this.markers = t; this.nMarkers = n; }
 
     @Override
@@ -77,7 +61,6 @@ public class SimplePlotView extends View {
         int h = getHeight();
         if (w <= 10 || h <= 10) return;
 
-        // grid
         int gx = 5;
         int gy = 3;
         for (int i = 1; i < gx; i++) {
@@ -89,23 +72,19 @@ public class SimplePlotView extends View {
             canvas.drawLine(0, y, w, y, gridPaint);
         }
 
-        // markers
         if (markers != null && nMarkers > 0) {
             for (int i = 0; i < nMarkers; i++) {
-                float t = markers[i];
-                float px = mapX(t, w);
+                float px = mapX(markers[i], w);
                 canvas.drawLine(px, 0, px, h, markerPaint);
             }
         }
 
-        // series
         drawSeries(canvas, x0, y0, n0, linePaints[0], w, h);
         drawSeries(canvas, x1, y1, n1, linePaints[1], w, h);
         drawSeries(canvas, x2, y2, n2, linePaints[2], w, h);
 
-        // title
         if (title != null && !title.isEmpty()) {
-            canvas.drawText(title, 12, 36, textPaint);
+            canvas.drawText(title, 12, 34, textPaint);
         }
     }
 

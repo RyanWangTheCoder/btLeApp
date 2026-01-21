@@ -1,11 +1,10 @@
 package com.clj.blesample.views;
 
-/** Lock-free-ish ring buffer for plotting points (single producer, single consumer). */
 public class RingBufferF {
     private final float[] xs;
     private final float[] ys;
     private final int cap;
-    private volatile int head = 0; // next write
+    private volatile int head = 0;
     private volatile int size = 0;
 
     public RingBufferF(int capacity) {
@@ -21,20 +20,16 @@ public class RingBufferF {
         h++;
         if (h >= cap) h = 0;
         head = h;
-        if (size < cap) size++; 
+        if (size < cap) size++;
     }
 
     public int snapshot(float tMin, float tMax, float[] outX, float[] outY) {
         int n = Math.min(size, Math.min(outX.length, outY.length));
         if (n <= 0) return 0;
-
-        // iterate from oldest to newest
-        int h = head;
-        int start = h - size;
+        int start = head - size;
         if (start < 0) start += cap;
-
-        int k = 0;
         int idx = start;
+        int k = 0;
         for (int i = 0; i < size; i++) {
             float x = xs[idx];
             if (x >= tMin && x <= tMax) {
@@ -55,6 +50,4 @@ public class RingBufferF {
         if (idx < 0) idx += cap;
         return xs[idx];
     }
-
-    public int getSize() { return size; }
 }

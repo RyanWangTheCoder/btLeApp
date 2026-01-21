@@ -1,6 +1,5 @@
 package com.clj.blesample.views;
 
-/** Ring buffer for marker times (vertical lines). */
 public class MarkerBufferF {
     private final float[] ts;
     private final int cap;
@@ -26,8 +25,8 @@ public class MarkerBufferF {
         if (n <= 0) return 0;
         int start = head - size;
         if (start < 0) start += cap;
-        int k = 0;
         int idx = start;
+        int k = 0;
         for (int i = 0; i < size; i++) {
             float t = ts[idx];
             if (t >= tMin && t <= tMax) {
@@ -38,12 +37,5 @@ public class MarkerBufferF {
             if (idx >= cap) idx = 0;
         }
         return k;
-    }
-
-    public float latestT() {
-        if (size <= 0) return 0f;
-        int idx = head - 1;
-        if (idx < 0) idx += cap;
-        return ts[idx];
     }
 }
