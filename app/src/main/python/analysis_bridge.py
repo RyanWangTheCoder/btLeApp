@@ -4,6 +4,7 @@ import os
 import numpy as np
 
 from emg_util_nopandas import compute_windowed_features, analyze_fatigue_from_windowed
+from btcentral_offline_decode import decode_frames_bin_to_rotated_csv
 
 
 def run_demo():
@@ -19,14 +20,13 @@ def run_demo():
 
 
 def process_session(session_dir: str):
+    """Decode a recorded session and emit rotated CSVs under <session_dir>/decoded/.
+
+    - Deletes+recreates decoded/ every run.
+    - Rotation: 20 minutes (device-time based), Windows-compatible schemas.
+    - Returns JSON summary with output file paths.
+    """
     session_dir = str(session_dir)
-    frames = os.path.join(session_dir, 'frames.bin')
-    meta = os.path.join(session_dir, 'meta.json')
-    out = {
-        "mode": "process_session_stub",
-        "session_dir": session_dir,
-        "frames_exists": os.path.exists(frames),
-        "meta_exists": os.path.exists(meta),
-        "frames_size": os.path.getsize(frames) if os.path.exists(frames) else 0,
-    }
-    return json.dumps(out)
+    stats = decode_frames_bin_to_rotated_csv(session_dir, rotate_min=20.0, overwrite_decoded=True)
+    # Return as JSON string for Android UI
+    return json.dumps(stats)
