@@ -101,6 +101,18 @@
             android:layout_y="23dp"
             android:text="@string/start_monitor" />
 
+        <Button
+            android:id="@+id/btn_process"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Process" />
+
+        <Button
+            android:id="@+id/btn_record"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Record" />
+
         <ImageView
             android:id="@+id/img_loading"
             android:layout_width="30dp"

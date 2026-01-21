@@ -33,6 +33,10 @@
         <activity android:name=".operation.OperationActivity" />
         <activity android:name=".operation.PlotActivity" />
 
+        <activity android:name=".analysis.ProcessingActivity" />
+
+        <activity android:name=".capture.SessionCaptureActivity" />
+
     </application>
 
 </manifest>
