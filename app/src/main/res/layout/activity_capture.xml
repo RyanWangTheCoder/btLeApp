@@ -12,12 +12,31 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:text="Status: Initializing..." />
-    <TextView
-        android:id="@+id/txtBattery"
-        android:layout_width="wrap_content"
+    <LinearLayout
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Battery: --%"
-        android:layout_marginTop="8dp"/>
+        android:orientation="horizontal"
+        android:layout_marginTop="8dp">
+
+        <TextView
+            android:id="@+id/txtBattery"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Battery: --%" />
+    <TextView
+            android:id="@+id/txtHeartRate"
+            android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+            android:layout_marginStart="16dp"
+            android:text="HR: --" />
+    <TextView
+            android:id="@+id/txtSpo2"
+            android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+            android:layout_marginStart="16dp"
+            android:text="SpO2: --%" />
+</LinearLayout>
+
     <TextView
         android:id="@+id/txtPackets"
         android:layout_width="wrap_content"

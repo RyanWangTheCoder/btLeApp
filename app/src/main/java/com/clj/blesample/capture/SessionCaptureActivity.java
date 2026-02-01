@@ -62,6 +62,8 @@ public class SessionCaptureActivity extends AppCompatActivity {
     private TextView txtStatus;
     private TextView txtStats;
     private TextView txtBattery;
+    private TextView txtHeartRate;
+    private TextView txtSpo2;
     private Button btnStart;
     private Button btnStop;
     private Button btnProcessSession;
@@ -136,6 +138,8 @@ public class SessionCaptureActivity extends AppCompatActivity {
         txtStatus = findViewById(R.id.txtStatus);
         txtStats = findViewById(R.id.txtStats);
         txtBattery = findViewById(R.id.txtBattery);
+        txtHeartRate = findViewById(R.id.txtHeartRate);
+        txtSpo2 = findViewById(R.id.txtSpo2);
         btnStart = findViewById(R.id.btnStartSession);
         btnStop = findViewById(R.id.btnStopSession);
         btnProcessSession = findViewById(R.id.btnProcessSession);

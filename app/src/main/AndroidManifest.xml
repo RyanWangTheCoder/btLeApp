@@ -35,7 +35,10 @@
 
         <activity android:name=".analysis.ProcessingActivity" />
 
-        <activity android:name=".capture.SessionCaptureActivity" />
+        <activity
+            android:name=".capture.SessionCaptureActivity"
+            android:exported="false"
+            android:label="Realtime monitoring" />
 
     </application>
 
