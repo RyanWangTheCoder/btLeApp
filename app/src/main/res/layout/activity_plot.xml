@@ -1,195 +1,216 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent">
-
     <LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical">
-
-        <!-- Raw EMG Signal View -->
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Raw EMG Signal"
-            android:textSize="14sp"
-            android:textStyle="bold"
-            android:padding="8dp"
-            android:background="#E0E0E0"/>
-
-        <com.clj.blesample.operation.EmgView
-            android:layout_width="match_parent"
-            android:layout_height="200dp"/>
-
-        <!-- Feature Plot View -->
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Feature Trends"
-            android:textSize="14sp"
-            android:textStyle="bold"
-            android:padding="8dp"
-            android:background="#E0E0E0"/>
-
-        <com.clj.blesample.operation.FeaturePlotView
-            android:id="@+id/featurePlotView"
-            android:layout_width="match_parent"
-            android:layout_height="200dp"
-            android:background="#FFFFFF"/>
-
-        <!-- Feature Selection Checkboxes -->
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Select Features to Plot:"
-            android:textSize="12sp"
-            android:textStyle="bold"
-            android:padding="8dp"
-            android:background="#F5F5F5"/>
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    tools:context=".operation.PlotActivity">
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:padding="8dp"
-            android:background="#F5F5F5">
-
-            <CheckBox
-                android:id="@+id/chkRms"
-                android:layout_width="0dp"
+        android:padding="5dp">
+            <TextView
+            android:id="@+id/txtBattery"
+            android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="RMS"
-                android:textColor="#FF0000"
-                android:checked="true"/>
-
-            <CheckBox
-                android:id="@+id/chkMnf"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="MNF"
-                android:textColor="#0000FF"
-                android:checked="true"/>
-
-            <CheckBox
-                android:id="@+id/chkMdf"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="MDF"
-                android:textColor="#00FF00"
-                android:checked="false"/>
-
+            android:text="Battery: --%"
+            android:textSize="16sp"
+            android:layout_marginEnd="10dp"/>
         </LinearLayout>
+
+    <ScrollView
+            android:layout_width="match_parent"
+        android:layout_height="match_parent">
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:paddingLeft="8dp"
-            android:paddingRight="8dp"
-            android:paddingBottom="8dp"
-            android:background="#F5F5F5">
+            android:orientation="vertical">
 
-            <CheckBox
-                android:id="@+id/chkWaveletEntropy"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="W.Ent"
-                android:textColor="#FF00FF"
-                android:checked="false"/>
-
-            <CheckBox
-                android:id="@+id/chkSampleEntropy"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="S.Ent"
-                android:textColor="#00FFFF"
-                android:checked="false"/>
-
-            <View
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"/>
-
-        </LinearLayout>
-
-        <!-- Current Feature Values -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:padding="12dp"
-            android:background="#FFFFFF">
-
+            <!-- Raw EMG Signal View -->
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Current Values"
+                android:text="Raw EMG Signal"
                 android:textSize="14sp"
                 android:textStyle="bold"
-                android:paddingBottom="8dp"/>
+                android:padding="8dp"
+                android:background="#E0E0E0"/>
 
+            <com.clj.blesample.operation.EmgView
+                android:layout_width="match_parent"
+                android:layout_height="200dp"/>
+
+            <!-- Feature Plot View -->
             <TextView
-                android:id="@+id/txtRms"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="RMS: --"
-                android:textSize="13sp"
-                android:textColor="#FF0000"/>
+                android:text="Feature Trends"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:padding="8dp"
+                android:background="#E0E0E0"/>
 
+            <com.clj.blesample.operation.FeaturePlotView
+                android:id="@+id/featurePlotView"
+                android:layout_width="match_parent"
+                android:layout_height="200dp"
+                android:background="#FFFFFF"/>
+
+            <!-- Feature Selection Checkboxes -->
             <TextView
-                android:id="@+id/txtMnf"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="MNF: -- Hz"
-                android:textSize="13sp"
-                android:textColor="#0000FF"/>
+                android:text="Select Features to Plot:"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:padding="8dp"
+                android:background="#F5F5F5"/>
 
-            <TextView
-                android:id="@+id/txtMdf"
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="MDF: -- Hz"
-                android:textSize="13sp"
-                android:textColor="#00FF00"/>
+                android:orientation="horizontal"
+                android:padding="8dp"
+                android:background="#F5F5F5">
 
-            <TextView
-                android:id="@+id/txtWaveletEntropy"
+                <CheckBox
+                    android:id="@+id/chkRms"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="RMS"
+                    android:textColor="#FF0000"
+                    android:checked="true"/>
+
+                <CheckBox
+                    android:id="@+id/chkMnf"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="MNF"
+                    android:textColor="#0000FF"
+                    android:checked="true"/>
+
+                <CheckBox
+                    android:id="@+id/chkMdf"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="MDF"
+                    android:textColor="#00FF00"
+                    android:checked="false"/>
+    </LinearLayout>
+
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Wavelet Entropy: --"
-                android:textSize="13sp"
-                android:textColor="#FF00FF"/>
+                android:orientation="horizontal"
+                android:paddingLeft="8dp"
+                android:paddingRight="8dp"
+                android:paddingBottom="8dp"
+                android:background="#F5F5F5">
 
-            <TextView
-                android:id="@+id/txtSampleEntropy"
+                <CheckBox
+                    android:id="@+id/chkWaveletEntropy"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="W.Ent"
+                    android:textColor="#FF00FF"
+                    android:checked="false"/>
+
+                <CheckBox
+                    android:id="@+id/chkSampleEntropy"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="S.Ent"
+                    android:textColor="#00FFFF"
+                    android:checked="false"/>
+
+                <View
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"/>
+
+            </LinearLayout>
+
+            <!-- Current Feature Values -->
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Sample Entropy: --"
-                android:textSize="13sp"
-                android:textColor="#00FFFF"/>
+                android:orientation="vertical"
+                android:padding="12dp"
+                android:background="#FFFFFF">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Current Values"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:paddingBottom="8dp"/>
+
+                <TextView
+                    android:id="@+id/txtRms"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="RMS: --"
+                    android:textSize="13sp"
+                    android:textColor="#FF0000"/>
+
+                <TextView
+                    android:id="@+id/txtMnf"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="MNF: -- Hz"
+                    android:textSize="13sp"
+                    android:textColor="#0000FF"/>
+
+                <TextView
+                    android:id="@+id/txtMdf"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="MDF: -- Hz"
+                    android:textSize="13sp"
+                    android:textColor="#00FF00"/>
+
+                <TextView
+                    android:id="@+id/txtWaveletEntropy"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Wavelet Entropy: --"
+                    android:textSize="13sp"
+                    android:textColor="#FF00FF"/>
+
+                <TextView
+                    android:id="@+id/txtSampleEntropy"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Sample Entropy: --"
+                    android:textSize="13sp"
+                    android:textColor="#00FFFF"/>
+
+            </LinearLayout>
+
+            <!-- Activity Info -->
+            <TextView
+                android:id="@+id/ActivityTimeText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:padding="8dp"
+                android:text="Activity Time (minutes)" />
+            <TextView
+                android:id="@+id/InjuryRiskText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:padding="8dp"
+                android:text="Probability of Injury: low" />
 
         </LinearLayout>
-
-        <!-- Activity Info -->
-        <TextView
-            android:id="@+id/ActivityTimeText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:padding="8dp"
-            android:text="Activity Time (minutes)" />
-        <TextView
-            android:id="@+id/InjuryRiskText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:padding="8dp"
-            android:text="Probability of Injury: low" />
-
-    </LinearLayout>
 </ScrollView>
+</LinearLayout>

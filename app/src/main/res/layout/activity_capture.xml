@@ -1,24 +1,35 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:padding="12dp">
+    android:padding="16dp"
+    tools:context=".capture.SessionCaptureActivity">
 
+    <TextView
+        android:id="@+id/txtStatus"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Status: Initializing..." />
+    <TextView
+        android:id="@+id/txtBattery"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Battery: --%"
+        android:layout_marginTop="8dp"/>
+    <TextView
+        android:id="@+id/txtPackets"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="Packets: 0" />
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="Session Recorder"
         android:textStyle="bold"
         android:textSize="18sp" />
-
-    <TextView
-        android:id="@+id/txtStatus"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:paddingTop="6dp"
-        android:text="Idle" />
-
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"

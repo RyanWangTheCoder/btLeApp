@@ -54,12 +54,14 @@ public class SessionCaptureActivity extends AppCompatActivity {
     private static final byte MAGIC1 = (byte)0x5A;
     private static final int TLV_EMG_BATCH = 0x01;
     private static final int TLV_IMU_BATCH = 0x02;
+    private static final int TLV_VITALS = 0x03;
 
     private static final int ENV_PLOT_HZ = 50;
     private volatile int rawPlotHz = 500;
 
     private TextView txtStatus;
     private TextView txtStats;
+    private TextView txtBattery;
     private Button btnStart;
     private Button btnStop;
     private Button btnProcessSession;
@@ -133,6 +135,7 @@ public class SessionCaptureActivity extends AppCompatActivity {
 
         txtStatus = findViewById(R.id.txtStatus);
         txtStats = findViewById(R.id.txtStats);
+        txtBattery = findViewById(R.id.txtBattery);
         btnStart = findViewById(R.id.btnStartSession);
         btnStop = findViewById(R.id.btnStopSession);
         btnProcessSession = findViewById(R.id.btnProcessSession);
@@ -147,14 +150,12 @@ public class SessionCaptureActivity extends AppCompatActivity {
         emgPlot.setTitle("EMG (RAW / ENV / LPF(abs(RAW)))");
         imuPlot.setTitle("IMU acc magnitude + markers");
 
-
-        if (Build.VERSION.SDK_INT >= 33) { // API 33+
+        if (Build.VERSION.SDK_INT >= 33) {
             //bleDevice = getIntent().getParcelableExtra("bleDevice", BleDevice.class);
             bleDevice = getIntent().getParcelableExtra("bleDevice");
         } else {
             bleDevice = getIntent().getParcelableExtra("bleDevice");
         }
-
 
         if (bleDevice == null) {
             txtStatus.setText("No BLE device. Connect first.");
@@ -238,7 +239,6 @@ public class SessionCaptureActivity extends AppCompatActivity {
         txtStatus.setText("Requesting MTU...");
         startWorkerThreads();
 
-        // Request a larger MTU so ESP32 TLV frames are not truncated to 20 bytes
         BleManager.getInstance().setMtu(bleDevice, 247, new BleMtuChangedCallback() {
             @Override public void onMtuChanged(int mtu) {
                 Log.e("BT_NOTIFY", "MTU changed to " + mtu);
@@ -247,15 +247,12 @@ public class SessionCaptureActivity extends AppCompatActivity {
             }
             @Override public void onSetMTUFailure(BleException exception) {
                 Log.e("BT_NOTIFY", "MTU request failed: " + exception);
-                // Continue anyway; you will keep seeing 20-byte chunks if MTU stays 23
                 subscribeNotifyAndStartPing();
             }
         });
     }
 
-
     private void subscribeNotifyAndStartPing() {
-        txtStatus.setText("Requesting MTU...");
         BleManager.getInstance().notify(
                 bleDevice,
                 NUS_SERVICE_UUID,
@@ -418,7 +415,7 @@ public class SessionCaptureActivity extends AppCompatActivity {
 
     private void updateStats() {
         txtStats.setText("frames=" + framesWritten + " bytes=" + bytesWritten +
-                "RAW=" + rawPlotHz + "Hz window=" + (int)windowSec + "s freeze=" + (frozen ? 1 : 0));
+                " RAW=" + rawPlotHz + "Hz window=" + (int)windowSec + "s freeze=" + (frozen ? 1 : 0));
     }
 
     private void writeMetaJson() throws IOException {
@@ -480,8 +477,23 @@ public class SessionCaptureActivity extends AppCompatActivity {
             int valOff = payloadOff + off;
             if (tlvType == TLV_EMG_BATCH) decodeEmgBatch(frame, valOff, tlvLen, tFrameUs);
             else if (tlvType == TLV_IMU_BATCH) decodeImuBatch(frame, valOff, tlvLen, tFrameUs);
+            else if (tlvType == TLV_VITALS) decodeVitals(frame, valOff, tlvLen);
             off += tlvLen;
         }
+    }
+
+    private void decodeVitals(byte[] buf, int valOff, int valLen) {
+        if (valLen < 11) return; // Vitals payload is 11 bytes
+        // spo2(2) hr(2) age(2) flags(1) bright(1) batt_pct(1) batt_mv(2)
+        final int batt_pct = buf[valOff + 8] & 0xFF; // 9th byte in payload
+
+        runOnUiThread(() -> {
+            if (batt_pct <= 100) {
+                txtBattery.setText("Battery: " + batt_pct + "%");
+            } else {
+                txtBattery.setText("Battery: N/A");
+            }
+        });
     }
 
     private void decodeEmgBatch(byte[] buf, int valOff, int valLen, long tFrameUs) {
