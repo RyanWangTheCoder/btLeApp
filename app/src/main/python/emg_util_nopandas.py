@@ -9,6 +9,7 @@ What this module keeps (core computation):
 - Windowed features: RMS, ENV mean/peak, MNF, MDF, (optional MAV/WL/ZC/SSC)
 - Simple fatigue analysis (MDF/MNF drop + optional onset detection)
 - Optional IMU swing detection (robust z-score on gyro/acc magnitude)
+- FatigueMonitor: stateful per-session real-time fatigue tracking
 
 What this module removes (Android-unfriendly):
 - pandas DataFrames
@@ -589,6 +590,544 @@ def analyze_fatigue_from_windowed(
         slope_mnf=slope_mnf,
         fatigue_onset_s=onset_time,
     )
+
+
+# ============================
+# Swing-aligned + baseline helpers (pandas-free, mirrors emg_util.py)
+# ============================
+
+def compute_swing_emg_features_nopandas(
+    proc: np.ndarray,
+    env: np.ndarray,
+    emg_ts_ms: np.ndarray,
+    emg_fs_hz: float,
+    swings: List[Dict[str, float]],
+    mdf_pad_ms: float = 300.0,
+    thr_zc: float = 0.01,
+    thr_ssc: float = 0.01,
+) -> List[Dict[str, float]]:
+    """Compute per-swing EMG features (pandas-free version of emg_util.compute_swing_emg_features).
+
+    MDF is computed on a padded window (±mdf_pad_ms) for PSD stability.
+    Envelope features use the exact swing window.
+
+    Args:
+        proc:        preprocessed EMG signal
+        env:         envelope signal
+        emg_ts_ms:   timestamp array (ms) aligned with proc/env
+        emg_fs_hz:   EMG sampling rate
+        swings:      list of dicts with keys: swing_id, t_start_ms, t_peak_ms, t_end_ms, peak_z, peak_mag
+        mdf_pad_ms:  padding around swing window for MDF computation
+
+    Returns:
+        list of dicts with per-swing features
+    """
+    if not swings:
+        return []
+
+    dt = 1.0 / float(emg_fs_hz)
+    rows = []
+
+    for r in swings:
+        t0 = float(r['t_start_ms'])
+        t1 = float(r['t_end_ms'])
+
+        # Envelope features on exact swing window
+        i0 = int(np.searchsorted(emg_ts_ms, t0, side='left'))
+        i1 = int(np.searchsorted(emg_ts_ms, t1, side='right'))
+        i0 = max(0, min(i0, len(emg_ts_ms) - 1))
+        i1 = max(i0 + 1, min(i1, len(emg_ts_ms)))
+        seg_env = env[i0:i1]
+        emg_env_peak = float(np.nanmax(seg_env)) if seg_env.size else float('nan')
+        emg_env_mean = float(np.nanmean(seg_env)) if seg_env.size else float('nan')
+        emg_iemg = float(np.nansum(seg_env) * dt) if seg_env.size else float('nan')
+
+        # Processed features on padded window (better PSD)
+        t0p = t0 - float(mdf_pad_ms)
+        t1p = t1 + float(mdf_pad_ms)
+        j0 = int(np.searchsorted(emg_ts_ms, t0p, side='left'))
+        j1 = int(np.searchsorted(emg_ts_ms, t1p, side='right'))
+        j0 = max(0, min(j0, len(emg_ts_ms) - 1))
+        j1 = max(j0 + 1, min(j1, len(emg_ts_ms)))
+        seg = proc[j0:j1]
+
+        mnf_val, mdf_val = mnf_mdf(seg, emg_fs_hz)
+
+        rows.append({
+            "swing_id": int(r['swing_id']),
+            "t_start_ms": t0,
+            "t_peak_ms": float(r['t_peak_ms']),
+            "t_end_ms": t1,
+            "peak_z": float(r.get('peak_z', float('nan'))),
+            "peak_mag": float(r.get('peak_mag', float('nan'))),
+            "emg_env_peak": emg_env_peak,
+            "emg_env_mean": emg_env_mean,
+            "emg_iemg": emg_iemg,
+            "mav": feat_mav(seg),
+            "rms": feat_rms(seg),
+            "wl": feat_wl(seg),
+            "zc": feat_zc(seg, thr=thr_zc),
+            "ssc": feat_ssc(seg, thr=thr_ssc),
+            "mnf": float(mnf_val),
+            "mdf": float(mdf_val),
+        })
+
+    return rows
+
+
+def select_baseline_swings_nopandas(
+    swings: List[Dict[str, float]],
+    session_t0_ms: float,
+    warmup_skip_min: float = 5.0,
+    warmup_skip_swings: Optional[int] = None,
+    baseline_swings: int = 20,
+) -> List[Dict[str, float]]:
+    """Select baseline swings after warm-up (pandas-free version of emg_util.select_baseline_swings)."""
+    if not swings:
+        return []
+    sw = sorted(swings, key=lambda r: r['t_peak_ms'])
+    cutoff = float(session_t0_ms) + float(warmup_skip_min) * 60.0 * 1000.0
+    sw2 = [r for r in sw if r['t_peak_ms'] >= cutoff]
+    if len(sw2) < max(3, baseline_swings // 2):
+        sw2 = sw
+    if warmup_skip_swings is not None and int(warmup_skip_swings) > 0:
+        sw2 = sw2[int(warmup_skip_swings):]
+    return sw2[:int(baseline_swings)]
+
+
+def compute_baseline_from_swing_features_nopandas(
+    swing_feats: List[Dict[str, float]],
+) -> Dict[str, float]:
+    """Compute robust (median) baseline from per-swing features."""
+    base: Dict[str, float] = {}
+    if not swing_feats:
+        return base
+    for k in ['mdf', 'rms', 'mav', 'wl', 'emg_env_mean', 'emg_iemg']:
+        vals = [r[k] for r in swing_feats if k in r and r[k] is not None and np.isfinite(r[k])]
+        if vals:
+            base[k] = float(np.median(vals))
+    return base
+
+
+def apply_baseline_deltas_nopandas(
+    rows: List[Dict[str, float]],
+    base: Dict[str, float],
+    prefix: str = '',
+) -> List[Dict[str, float]]:
+    """Add mdf_drop_pct and rms_increase_pct to each row (pandas-free)."""
+    out = []
+    for r in rows:
+        r2 = dict(r)
+        if 'mdf' in r2 and 'mdf' in base and base['mdf'] and np.isfinite(base['mdf']) and r2['mdf'] is not None:
+            r2[prefix + 'mdf_drop_pct'] = (base['mdf'] - float(r2['mdf'])) / base['mdf'] * 100.0
+        if 'rms' in r2 and 'rms' in base and base['rms'] and np.isfinite(base['rms']) and r2['rms'] is not None:
+            r2[prefix + 'rms_increase_pct'] = (float(r2['rms']) - base['rms']) / base['rms'] * 100.0
+        out.append(r2)
+    return out
+
+
+def load_decoded_emg_csv(path: Union[str, Path]) -> Dict[str, np.ndarray]:
+    """Load a decoded EMG CSV (dev_us, emg_seq, env, raw, ref, ...) into arrays.
+
+    Converts dev_us (microseconds) → ts_ms (milliseconds) for compatibility
+    with emg_util.py column naming.
+    """
+    cols_in = ["dev_us", "env", "raw"]
+    d: Dict[str, List[float]] = {c: [] for c in cols_in}
+    with open(path, 'r', newline='', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            for c in cols_in:
+                d[c].append(_to_float(row.get(c)))
+    dev_us = np.asarray(d["dev_us"], dtype=np.float64)
+    return {
+        "ts_ms": dev_us / 1000.0,
+        "env": np.asarray(d["env"], dtype=np.float64),
+        "raw": np.asarray(d["raw"], dtype=np.float64),
+    }
+
+
+def load_decoded_imu_csv(path: Union[str, Path]) -> Dict[str, np.ndarray]:
+    """Load a decoded IMU CSV (dev_us, imu_seq, ax, ay, az, gx, gy, gz, ...) into arrays.
+
+    Converts dev_us → ts_ms.
+    """
+    cols_in = ["dev_us", "ax", "ay", "az", "gx", "gy", "gz"]
+    d: Dict[str, List[float]] = {c: [] for c in cols_in}
+    with open(path, 'r', newline='', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            for c in cols_in:
+                d[c].append(_to_float(row.get(c)))
+    dev_us = np.asarray(d["dev_us"], dtype=np.float64)
+    return {
+        "ts_ms": dev_us / 1000.0,
+        "ax": np.asarray(d["ax"], dtype=np.float64),
+        "ay": np.asarray(d["ay"], dtype=np.float64),
+        "az": np.asarray(d["az"], dtype=np.float64),
+        "gx": np.asarray(d["gx"], dtype=np.float64),
+        "gy": np.asarray(d["gy"], dtype=np.float64),
+        "gz": np.asarray(d["gz"], dtype=np.float64),
+    }
+
+
+def stitch_decoded_session(
+    decoded_dir: Union[str, Path],
+    emg_fs_hz: float,
+    win_sec: float = 1.0,
+    step_sec: float = 0.25,
+    warmup_skip_min: float = 5.0,
+    baseline_swings: int = 20,
+    swing_z_thr: float = 5.0,
+    swing_pre_ms: float = 250.0,
+    swing_post_ms: float = 450.0,
+    mdf_pad_ms: float = 300.0,
+) -> Dict:
+    """Load all decoded CSVs from a session, stitch them, run full analysis.
+
+    Mirrors the emg_util.py CLI pipeline but pandas-free.
+
+    Returns a dict with:
+        window_feats:   list of dicts (windowed features)
+        swing_windows:  list of dicts (detected swings)
+        swing_feats:    list of dicts (per-swing features with baseline deltas)
+        baseline:       dict (baseline values)
+        summary:        dict (fatigue summary)
+    """
+    decoded_dir = Path(decoded_dir)
+
+    # --- Load and stitch all EMG CSVs ---
+    emg_paths = sorted(decoded_dir.glob("emg_log_*.csv"))
+    if not emg_paths:
+        raise FileNotFoundError(f"No emg_log_*.csv found in {decoded_dir}")
+
+    emg_ts_list: List[float] = []
+    emg_env_list: List[float] = []
+    emg_raw_list: List[float] = []
+
+    for p in emg_paths:
+        d = load_decoded_emg_csv(p)
+        emg_ts_list.extend(d["ts_ms"].tolist())
+        emg_env_list.extend(d["env"].tolist())
+        emg_raw_list.extend(d["raw"].tolist())
+
+    emg_ts_ms = np.asarray(emg_ts_list, dtype=np.float64)
+    emg_raw = np.asarray(emg_raw_list, dtype=np.float64)
+
+    # Sort by timestamp
+    order = np.argsort(emg_ts_ms, kind='mergesort')
+    emg_ts_ms = emg_ts_ms[order]
+    emg_raw = emg_raw[order]
+
+    # Filter valid rows
+    valid = np.isfinite(emg_raw) & np.isfinite(emg_ts_ms)
+    emg_ts_ms = emg_ts_ms[valid]
+    emg_raw = emg_raw[valid]
+
+    if emg_raw.size == 0:
+        raise ValueError("No valid EMG samples after stitching")
+
+    # Rebuild uniform timestamp axis from session start
+    t0_ms = float(emg_ts_ms[0])
+    emg_ts_uniform = t0_ms + (np.arange(emg_raw.size, dtype=np.float64) / float(emg_fs_hz)) * 1000.0
+
+    # Preprocess
+    proc = preprocess_emg(emg_raw, float(emg_fs_hz))
+    env_sig = envelope(proc, float(emg_fs_hz))
+
+    # --- Load and stitch all IMU CSVs ---
+    imu_paths = sorted(decoded_dir.glob("imu_log_*.csv"))
+    imu_ts_ms = np.array([], dtype=np.float64)
+    imu_ax = imu_ay = imu_az = imu_gx = imu_gy = imu_gz = np.array([], dtype=np.float64)
+
+    if imu_paths:
+        imu_ts_list: List[float] = []
+        imu_ax_list: List[float] = []
+        imu_ay_list: List[float] = []
+        imu_az_list: List[float] = []
+        imu_gx_list: List[float] = []
+        imu_gy_list: List[float] = []
+        imu_gz_list: List[float] = []
+
+        for p in imu_paths:
+            d = load_decoded_imu_csv(p)
+            imu_ts_list.extend(d["ts_ms"].tolist())
+            imu_ax_list.extend(d["ax"].tolist())
+            imu_ay_list.extend(d["ay"].tolist())
+            imu_az_list.extend(d["az"].tolist())
+            imu_gx_list.extend(d["gx"].tolist())
+            imu_gy_list.extend(d["gy"].tolist())
+            imu_gz_list.extend(d["gz"].tolist())
+
+        imu_ts_ms = np.asarray(imu_ts_list, dtype=np.float64)
+        imu_order = np.argsort(imu_ts_ms, kind='mergesort')
+        imu_ts_ms = imu_ts_ms[imu_order]
+        imu_ax = np.asarray(imu_ax_list, dtype=np.float64)[imu_order]
+        imu_ay = np.asarray(imu_ay_list, dtype=np.float64)[imu_order]
+        imu_az = np.asarray(imu_az_list, dtype=np.float64)[imu_order]
+        imu_gx = np.asarray(imu_gx_list, dtype=np.float64)[imu_order]
+        imu_gy = np.asarray(imu_gy_list, dtype=np.float64)[imu_order]
+        imu_gz = np.asarray(imu_gz_list, dtype=np.float64)[imu_order]
+
+    # --- Windowed features ---
+    _, feats_dict = compute_windowed_features(
+        emg_raw,
+        emg_fs_hz=float(emg_fs_hz),
+        emg_start_ts_ms=t0_ms,
+        win_sec=float(win_sec),
+        step_sec=float(step_sec),
+        include_classic=True,
+    )
+    window_feats = []
+    if feats_dict:
+        keys = list(feats_dict.keys())
+        n_rows = len(feats_dict[keys[0]])
+        for i in range(n_rows):
+            window_feats.append({k: float(feats_dict[k][i]) for k in keys})
+
+    # --- Swing detection ---
+    swing_windows: List[Dict[str, float]] = []
+    swing_feats: List[Dict[str, float]] = []
+    baseline: Dict[str, float] = {}
+
+    if imu_ts_ms.size > 0:
+        swing_windows = detect_swing_windows_from_imu_arrays(
+            imu_ts_ms, imu_ax, imu_ay, imu_az, imu_gx, imu_gy, imu_gz,
+            z_thr=float(swing_z_thr),
+            pre_ms=float(swing_pre_ms),
+            post_ms=float(swing_post_ms),
+            use_gyro=True,
+        )
+
+        if swing_windows:
+            swing_feats = compute_swing_emg_features_nopandas(
+                proc, env_sig, emg_ts_uniform, float(emg_fs_hz),
+                swing_windows, mdf_pad_ms=float(mdf_pad_ms),
+            )
+
+            # Baseline selection
+            base_swings = select_baseline_swings_nopandas(
+                swing_windows, session_t0_ms=t0_ms,
+                warmup_skip_min=float(warmup_skip_min),
+                baseline_swings=int(baseline_swings),
+            )
+            base_ids = {int(r['swing_id']) for r in base_swings}
+            base_feats = [r for r in swing_feats if int(r['swing_id']) in base_ids]
+            baseline = compute_baseline_from_swing_features_nopandas(base_feats)
+
+            if baseline:
+                swing_feats = apply_baseline_deltas_nopandas(swing_feats, baseline)
+                window_feats = apply_baseline_deltas_nopandas(window_feats, baseline)
+
+    # --- Summary ---
+    mdf_drops = [r.get('mdf_drop_pct') for r in swing_feats if r.get('mdf_drop_pct') is not None]
+    summary = {
+        "num_emg_samples": int(emg_raw.size),
+        "num_imu_samples": int(imu_ts_ms.size),
+        "num_windows": len(window_feats),
+        "num_swings": len(swing_windows),
+        "baseline_mdf": baseline.get('mdf'),
+        "baseline_rms": baseline.get('rms'),
+        "max_mdf_drop_pct": float(max(mdf_drops)) if mdf_drops else None,
+        "mean_mdf_drop_pct": float(np.mean(mdf_drops)) if mdf_drops else None,
+        "session_duration_s": float(emg_ts_ms[-1] - emg_ts_ms[0]) / 1000.0 if emg_ts_ms.size > 1 else 0.0,
+    }
+
+    return {
+        "window_feats": window_feats,
+        "swing_windows": swing_windows,
+        "swing_feats": swing_feats,
+        "baseline": baseline,
+        "summary": summary,
+    }
+
+
+# ============================
+# Real-time per-session fatigue monitor
+# ============================
+
+class FatigueMonitor:
+    """Stateful per-session fatigue tracker for real-time use.
+
+    Usage (called from analysis_bridge.py via Chaquopy):
+        monitor = FatigueMonitor(fs=2000.0)
+        monitor.reset()
+        result = monitor.push_swing(emg_raw_list, t_peak_ms, imu_peak_mag)
+        # result is a plain dict — JSON-serializable
+
+    Fatigue level (0-100):
+        0-33  = green  (fresh)
+        34-66 = yellow (moderate fatigue)
+        67-100 = red   (high fatigue — consider rest)
+
+    Baseline is established from the first `baseline_swings` swings
+    that occur after `warmup_skip_min` minutes.
+    """
+
+    def __init__(
+        self,
+        fs: float = 2000.0,
+        warmup_skip_min: float = 5.0,
+        baseline_swings: int = 20,
+        mdf_warn_pct: float = 12.0,
+        mdf_high_pct: float = 20.0,
+    ):
+        self._fs = float(fs)
+        self._warmup_skip_ms = warmup_skip_min * 60.0 * 1000.0
+        self._baseline_swings = int(baseline_swings)
+        self._mdf_warn_pct = float(mdf_warn_pct)   # yellow threshold
+        self._mdf_high_pct = float(mdf_high_pct)   # red threshold
+
+        # Session state
+        self._swing_id: int = 0
+        self._t_session_start_ms: Optional[float] = None
+        self._baseline_mdf: Optional[float] = None
+        self._baseline_rms: Optional[float] = None
+        self._baseline_samples: List[Tuple[float, float]] = []  # (mdf, rms)
+        self._history: List[dict] = []  # all swing results
+
+    def reset(self) -> None:
+        """Call at the start of each new session."""
+        self._swing_id = 0
+        self._t_session_start_ms = None
+        self._baseline_mdf = None
+        self._baseline_rms = None
+        self._baseline_samples = []
+        self._history = []
+
+    def push_swing(
+        self,
+        emg_raw: List[float],
+        t_peak_ms: float,
+        imu_peak_mag: float,
+    ) -> dict:
+        """Process one swing window and return fatigue metrics.
+
+        Args:
+            emg_raw:      raw EMG samples at self._fs Hz (700ms window = ~1400 samples)
+            t_peak_ms:    absolute time of swing peak in ms (from session start)
+            imu_peak_mag: IMU magnitude at swing peak (for effort proxy)
+
+        Returns:
+            dict with keys:
+                swing_id        int
+                t_peak_ms       float
+                mdf             float  (Hz)
+                rms             float
+                env_mean        float
+                imu_peak_mag    float
+                mdf_drop_pct    float  (NaN until baseline established)
+                rms_increase_pct float (NaN until baseline established)
+                fatigue_pct     float  (0-100, NaN until baseline established)
+                fatigue_level   str    ("warming_up" | "fresh" | "moderate" | "high")
+                warning         bool
+                baseline_ready  bool
+                baseline_swings_collected int
+        """
+        t_peak_ms = float(t_peak_ms)
+        imu_peak_mag = float(imu_peak_mag)
+
+        # Record session start time on first swing
+        if self._t_session_start_ms is None:
+            self._t_session_start_ms = t_peak_ms
+
+        # Compute EMG features
+        raw = np.asarray(emg_raw, dtype=np.float64)
+        mdf_val = float('nan')
+        rms_val = float('nan')
+        env_mean = float('nan')
+
+        if raw.size >= 32:
+            proc = preprocess_emg(raw, self._fs)
+            _, mdf_val = mnf_mdf(proc, self._fs)
+            rms_val = float(np.sqrt(np.nanmean(proc * proc)))
+            env_mean = float(np.nanmean(np.abs(raw)))
+
+        # Baseline collection: after warmup, first N valid swings
+        t_elapsed_ms = t_peak_ms - self._t_session_start_ms
+        in_warmup = t_elapsed_ms < self._warmup_skip_ms
+        baseline_ready = self._baseline_mdf is not None
+
+        if not baseline_ready and not in_warmup:
+            if np.isfinite(mdf_val) and np.isfinite(rms_val):
+                self._baseline_samples.append((mdf_val, rms_val))
+                if len(self._baseline_samples) >= self._baseline_swings:
+                    mdfs = [s[0] for s in self._baseline_samples]
+                    rmss = [s[1] for s in self._baseline_samples]
+                    self._baseline_mdf = float(np.median(mdfs))
+                    self._baseline_rms = float(np.median(rmss))
+
+        # Fatigue deltas
+        mdf_drop_pct = float('nan')
+        rms_increase_pct = float('nan')
+        fatigue_pct = float('nan')
+        warning = False
+
+        if baseline_ready and np.isfinite(mdf_val):
+            if self._baseline_mdf and self._baseline_mdf > 0:
+                mdf_drop_pct = (self._baseline_mdf - mdf_val) / self._baseline_mdf * 100.0
+            if self._baseline_rms and self._baseline_rms > 0 and np.isfinite(rms_val):
+                rms_increase_pct = (rms_val - self._baseline_rms) / self._baseline_rms * 100.0
+
+            # Fatigue % based on MDF drop (clamped 0-100)
+            if np.isfinite(mdf_drop_pct):
+                fatigue_pct = float(np.clip(mdf_drop_pct / self._mdf_high_pct * 100.0, 0.0, 100.0))
+                warning = mdf_drop_pct >= self._mdf_warn_pct
+
+        # Fatigue level label
+        if in_warmup or not baseline_ready:
+            level = "warming_up"
+        elif not np.isfinite(fatigue_pct):
+            level = "unknown"
+        elif fatigue_pct < 33.0:
+            level = "fresh"
+        elif fatigue_pct < 67.0:
+            level = "moderate"
+        else:
+            level = "high"
+
+        result = {
+            "swing_id": int(self._swing_id),
+            "t_peak_ms": t_peak_ms,
+            "mdf": round(mdf_val, 2) if np.isfinite(mdf_val) else None,
+            "rms": round(rms_val, 4) if np.isfinite(rms_val) else None,
+            "env_mean": round(env_mean, 2) if np.isfinite(env_mean) else None,
+            "imu_peak_mag": round(imu_peak_mag, 1),
+            "mdf_drop_pct": round(mdf_drop_pct, 2) if np.isfinite(mdf_drop_pct) else None,
+            "rms_increase_pct": round(rms_increase_pct, 2) if np.isfinite(rms_increase_pct) else None,
+            "fatigue_pct": round(fatigue_pct, 1) if np.isfinite(fatigue_pct) else None,
+            "fatigue_level": level,
+            "warning": bool(warning),
+            "baseline_ready": bool(baseline_ready),
+            "baseline_swings_collected": len(self._baseline_samples),
+            "baseline_mdf": round(self._baseline_mdf, 2) if self._baseline_mdf is not None else None,
+        }
+
+        self._history.append(result)
+        self._swing_id += 1
+        return result
+
+    def get_summary(self) -> dict:
+        """Return session summary dict (JSON-serializable)."""
+        n = len(self._history)
+        if n == 0:
+            return {"num_swings": 0, "baseline_ready": False}
+
+        mdfs = [r["mdf"] for r in self._history if r["mdf"] is not None]
+        drops = [r["mdf_drop_pct"] for r in self._history if r["mdf_drop_pct"] is not None]
+        warnings = sum(1 for r in self._history if r["warning"])
+
+        return {
+            "num_swings": n,
+            "baseline_ready": bool(self._baseline_mdf is not None),
+            "baseline_mdf": round(self._baseline_mdf, 2) if self._baseline_mdf is not None else None,
+            "baseline_rms": round(self._baseline_rms, 4) if self._baseline_rms is not None else None,
+            "latest_mdf": round(mdfs[-1], 2) if mdfs else None,
+            "latest_mdf_drop_pct": round(drops[-1], 2) if drops else None,
+            "max_mdf_drop_pct": round(max(drops), 2) if drops else None,
+            "warning_swings": warnings,
+            "fatigue_level": self._history[-1]["fatigue_level"] if self._history else "unknown",
+        }
 
 
 # ============================

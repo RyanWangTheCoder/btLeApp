@@ -15,6 +15,9 @@ import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
 
+import com.chaquo.python.PyObject;
+import com.chaquo.python.Python;
+import com.chaquo.python.android.AndroidPlatform;
 import com.clj.blesample.R;
 import com.clj.blesample.analysis.ProcessingActivity;
 import com.clj.blesample.views.MarkerBufferF;
@@ -26,6 +29,8 @@ import com.clj.fastble.callback.BleMtuChangedCallback;
 import com.clj.fastble.callback.BleWriteCallback;
 import com.clj.fastble.data.BleDevice;
 import com.clj.fastble.exception.BleException;
+
+import org.json.JSONObject;
 
 import java.io.BufferedOutputStream;
 import java.io.File;
@@ -39,6 +44,7 @@ import java.util.Locale;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.TimeUnit;
 
 public class SessionCaptureActivity extends AppCompatActivity {
 
@@ -58,6 +64,16 @@ public class SessionCaptureActivity extends AppCompatActivity {
 
     private static final int ENV_PLOT_HZ = 50;
     private volatile int rawPlotHz = 500;
+
+    // ── Fatigue monitoring ──────────────────────────────────────────────────
+    /** 1300 ms at 2000 Hz, includes ±300 ms MDF padding on each side. */
+    private static final int EMG_FATIGUE_BUF_SIZE = 2600;
+    private final RingBufferF emgFatigueBuf = new RingBufferF(EMG_FATIGUE_BUF_SIZE);
+    private final ArrayBlockingQueue<FatigueJob> fatigueQueue = new ArrayBlockingQueue<>(1);
+    private Thread fatigueThread;
+    private volatile boolean fatigueRunning = false;
+    private TextView txtFatigue;
+    // ───────────────────────────────────────────────────────────────────────
 
     private TextView txtStatus;
     private TextView txtStats;
@@ -150,6 +166,7 @@ public class SessionCaptureActivity extends AppCompatActivity {
         seekImuThr = findViewById(R.id.seekImuThr);
         emgPlot = findViewById(R.id.emgPlot);
         imuPlot = findViewById(R.id.imuPlot);
+        txtFatigue = findViewById(R.id.txtFatigue);
 
         emgPlot.setTitle("EMG (RAW / ENV / LPF(abs(RAW)))");
         imuPlot.setTitle("IMU acc magnitude + markers");
@@ -209,6 +226,7 @@ public class SessionCaptureActivity extends AppCompatActivity {
         });
 
         txtStatus.setText("Ready. Connected=" + BleManager.getInstance().isConnected(bleDevice));
+        startFatigueThread();
         ui.post(uiTick);
     }
 
@@ -242,6 +260,19 @@ public class SessionCaptureActivity extends AppCompatActivity {
         btnStop.setEnabled(true);
         txtStatus.setText("Requesting MTU...");
         startWorkerThreads();
+
+        // Reset fatigue monitor for the new session (background — Chaquopy can be slow)
+        new Thread(() -> {
+            try {
+                if (!Python.isStarted()) Python.start(new AndroidPlatform(SessionCaptureActivity.this));
+                Python py = Python.getInstance();
+                PyObject mod = py.getModule("analysis_bridge");
+                mod.callAttr("reset_fatigue_monitor");
+                ui.post(() -> txtFatigue.setText("Fatigue: monitoring..."));
+            } catch (Exception e) {
+                Log.w(TAG, "reset_fatigue_monitor failed", e);
+            }
+        }, "fatigueReset").start();
 
         BleManager.getInstance().setMtu(bleDevice, 247, new BleMtuChangedCallback() {
             @Override public void onMtuChanged(int mtu) {
@@ -351,6 +382,105 @@ public class SessionCaptureActivity extends AppCompatActivity {
         qLog.clear();
         qPlot.clear();
     }
+
+    // ── Fatigue thread ──────────────────────────────────────────────────────
+
+    private void startFatigueThread() {
+        fatigueRunning = true;
+        fatigueThread = new Thread(() -> {
+            // Ensure Python is started before entering the loop
+            try {
+                if (!Python.isStarted()) Python.start(new AndroidPlatform(SessionCaptureActivity.this));
+            } catch (Exception e) {
+                Log.w(TAG, "fatigueThread: Python.start failed", e);
+            }
+            while (fatigueRunning) {
+                FatigueJob job;
+                try {
+                    job = fatigueQueue.poll(200, TimeUnit.MILLISECONDS);
+                } catch (InterruptedException e) {
+                    break;
+                }
+                if (job == null) continue;
+                try {
+                    // Build JSON array string from raw EMG samples
+                    StringBuilder sb = new StringBuilder(job.emg.length * 6 + 2);
+                    sb.append('[');
+                    for (int i = 0; i < job.emg.length; i++) {
+                        if (i > 0) sb.append(',');
+                        sb.append((int) job.emg[i]); // raw ADC values are integers
+                    }
+                    sb.append(']');
+                    String emgJson = sb.toString();
+
+                    Python py = Python.getInstance();
+                    PyObject mod = py.getModule("analysis_bridge");
+                    String result = mod.callAttr(
+                            "push_swing_realtime", emgJson, job.tPeakMs, job.imuPeakMag
+                    ).toString();
+
+                    final String display = parseFatigueDisplay(result);
+                    ui.post(() -> txtFatigue.setText(display));
+                } catch (Exception e) {
+                    Log.w(TAG, "fatigueThread: push_swing_realtime failed", e);
+                }
+            }
+        }, "fatigueThread");
+        fatigueThread.start();
+    }
+
+    private void stopFatigueThread() {
+        fatigueRunning = false;
+        if (fatigueThread != null) {
+            fatigueThread.interrupt();
+            try { fatigueThread.join(500); } catch (InterruptedException ignored) {}
+            fatigueThread = null;
+        }
+        fatigueQueue.clear();
+    }
+
+    /**
+     * Parse the JSON returned by push_swing_realtime and format a one-line display string.
+     *
+     * Key fields used:
+     *   swing_id (int), mdf (float|null), mdf_drop_pct (float|null),
+     *   fatigue_level (str), warning (bool), baseline_ready (bool),
+     *   baseline_swings_collected (int)
+     */
+    private String parseFatigueDisplay(String json) {
+        try {
+            JSONObject obj = new JSONObject(json);
+            if (obj.has("error")) return "Fatigue: " + obj.getString("error");
+
+            int swingId = obj.optInt("swing_id", 0);
+            double mdf = obj.isNull("mdf") ? Double.NaN : obj.optDouble("mdf", Double.NaN);
+            boolean baselineReady = obj.optBoolean("baseline_ready", false);
+            int baselineCollected = obj.optInt("baseline_swings_collected", 0);
+            String level = obj.optString("fatigue_level", "");
+            boolean warning = obj.optBoolean("warning", false);
+            double mdfDropPct = obj.isNull("mdf_drop_pct") ? Double.NaN
+                    : obj.optDouble("mdf_drop_pct", Double.NaN);
+
+            String mdfStr = Double.isNaN(mdf) ? "?" : String.format(Locale.US, "%.1f", mdf);
+
+            if (!baselineReady) {
+                return String.format(Locale.US,
+                        "Swing #%d | MDF=%s Hz [baseline %d/20]",
+                        swingId, mdfStr, baselineCollected);
+            } else {
+                String dropStr = Double.isNaN(mdfDropPct) ? "?"
+                        : String.format(Locale.US, "%.1f%%", mdfDropPct);
+                String warn = warning ? " (!)" : "";
+                return String.format(Locale.US,
+                        "Swing #%d | MDF=%s Hz | Drop=%s | %s%s",
+                        swingId, mdfStr, dropStr, level.toUpperCase(Locale.US), warn);
+            }
+        } catch (Exception e) {
+            return "Fatigue: " + json;
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────
 
     private void startPingTimer() {
         stopPingTimer();
@@ -525,6 +655,10 @@ public class SessionCaptureActivity extends AppCompatActivity {
             int env = u16le(buf, base);
             int raw = (ch >= 2) ? u16le(buf, base + 2) : 0;
 
+            // Push every raw sample into the fatigue ring buffer at full rate (2000 Hz).
+            // This must happen before any decimation so the MDF window is complete.
+            emgFatigueBuf.add(tSec, (float)raw);
+
             long seq = seq0 + i;
             if ((seq % rawDecim) == 0) emgRawBuf.add(tSec, (float)raw);
             if ((seq % envDecim) == 0) {
@@ -568,6 +702,14 @@ public class SessionCaptureActivity extends AppCompatActivity {
                 if (amag >= imuThreshold && (devUs - lastMarkerUs) > MARKER_DEBOUNCE_US) {
                     markers.add(tSec);
                     lastMarkerUs = devUs;
+
+                    // Snapshot the full-rate EMG ring buffer and queue for fatigue analysis.
+                    // offer() drops the job if the previous one is still being processed (depth=1).
+                    float[] emgSnap = emgFatigueBuf.snapshotY();
+                    if (emgSnap.length > 0) {
+                        float tPeakMs = tSec * 1000f;
+                        fatigueQueue.offer(new FatigueJob(emgSnap, tPeakMs, amag));
+                    }
                 }
             }
         }
@@ -650,6 +792,22 @@ public class SessionCaptureActivity extends AppCompatActivity {
     protected void onDestroy() {
         super.onDestroy();
         ui.removeCallbacks(uiTick);
+        stopFatigueThread();
         stopSession();
+    }
+
+    // ── Inner classes ───────────────────────────────────────────────────────
+
+    /** Carries one swing's EMG snapshot plus timing/magnitude metadata to fatigueThread. */
+    private static class FatigueJob {
+        final float[] emg;
+        final float tPeakMs;
+        final float imuPeakMag;
+
+        FatigueJob(float[] emg, float tPeakMs, float imuPeakMag) {
+            this.emg = emg;
+            this.tPeakMs = tPeakMs;
+            this.imuPeakMag = imuPeakMag;
+        }
     }
 }

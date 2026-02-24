@@ -44,6 +44,22 @@ public class RingBufferF {
         return k;
     }
 
+    /** Return all y-values in chronological order as a new float[]. */
+    public float[] snapshotY() {
+        int n = size;
+        float[] out = new float[n];
+        if (n <= 0) return out;
+        int start = head - n;
+        if (start < 0) start += cap;
+        int idx = start;
+        for (int i = 0; i < n; i++) {
+            out[i] = ys[idx];
+            idx++;
+            if (idx >= cap) idx = 0;
+        }
+        return out;
+    }
+
     public float latestX() {
         if (size <= 0) return 0f;
         int idx = head - 1;
