@@ -170,15 +170,25 @@ class SegmentCsv:
     header: List[str]
     meta: Dict
     idx: int
+    # open_id: timestamp when this file was "opened" (rotation boundary).
+    # Defaults to session_id so output matches Windows btCentral.py filename format:
+    #   emg_log_<session_id>_<open_id>_<idx>.csv
+    # which is required by capture_loader.discover_sessions() on PC.
+    open_id: str = ""
 
     fp: Optional[object] = None
     w: Optional[csv.writer] = None
 
+    def __post_init__(self):
+        # Default open_id to session_id if not provided
+        if not self.open_id:
+            self.open_id = self.session_id
+
     def csv_path(self) -> Path:
-        return self.outdir / f"{self.base}_{self.session_id}_{self.idx:03d}.csv"
+        return self.outdir / f"{self.base}_{self.session_id}_{self.open_id}_{self.idx:03d}.csv"
 
     def meta_path(self) -> Path:
-        return self.outdir / f"{self.base}_{self.session_id}_{self.idx:03d}.meta.json"
+        return self.outdir / f"{self.base}_{self.session_id}_{self.open_id}_{self.idx:03d}.meta.json"
 
     def open(self):
         self.outdir.mkdir(parents=True, exist_ok=True)

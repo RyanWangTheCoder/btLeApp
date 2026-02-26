@@ -596,7 +596,7 @@ def analyze_fatigue_from_windowed(
 # Swing-aligned + baseline helpers (pandas-free, mirrors emg_util.py)
 # ============================
 
-def compute_swing_emg_features_nopandas(
+def compute_swing_emg_features(
     proc: np.ndarray,
     env: np.ndarray,
     emg_ts_ms: np.ndarray,
@@ -675,7 +675,11 @@ def compute_swing_emg_features_nopandas(
     return rows
 
 
-def select_baseline_swings_nopandas(
+# Backward-compat alias
+compute_swing_emg_features_nopandas = compute_swing_emg_features
+
+
+def select_baseline_swings(
     swings: List[Dict[str, float]],
     session_t0_ms: float,
     warmup_skip_min: float = 5.0,
@@ -695,7 +699,11 @@ def select_baseline_swings_nopandas(
     return sw2[:int(baseline_swings)]
 
 
-def compute_baseline_from_swing_features_nopandas(
+# Backward-compat alias
+select_baseline_swings_nopandas = select_baseline_swings
+
+
+def compute_baseline_from_swing_features(
     swing_feats: List[Dict[str, float]],
 ) -> Dict[str, float]:
     """Compute robust (median) baseline from per-swing features."""
@@ -709,7 +717,11 @@ def compute_baseline_from_swing_features_nopandas(
     return base
 
 
-def apply_baseline_deltas_nopandas(
+# Backward-compat alias
+compute_baseline_from_swing_features_nopandas = compute_baseline_from_swing_features
+
+
+def apply_baseline_deltas(
     rows: List[Dict[str, float]],
     base: Dict[str, float],
     prefix: str = '',
@@ -724,6 +736,10 @@ def apply_baseline_deltas_nopandas(
             r2[prefix + 'rms_increase_pct'] = (float(r2['rms']) - base['rms']) / base['rms'] * 100.0
         out.append(r2)
     return out
+
+
+# Backward-compat alias
+apply_baseline_deltas_nopandas = apply_baseline_deltas
 
 
 def load_decoded_emg_csv(path: Union[str, Path]) -> Dict[str, np.ndarray]:
@@ -900,24 +916,24 @@ def stitch_decoded_session(
         )
 
         if swing_windows:
-            swing_feats = compute_swing_emg_features_nopandas(
+            swing_feats = compute_swing_emg_features(
                 proc, env_sig, emg_ts_uniform, float(emg_fs_hz),
                 swing_windows, mdf_pad_ms=float(mdf_pad_ms),
             )
 
             # Baseline selection
-            base_swings = select_baseline_swings_nopandas(
+            base_swings = select_baseline_swings(
                 swing_windows, session_t0_ms=t0_ms,
                 warmup_skip_min=float(warmup_skip_min),
                 baseline_swings=int(baseline_swings),
             )
             base_ids = {int(r['swing_id']) for r in base_swings}
             base_feats = [r for r in swing_feats if int(r['swing_id']) in base_ids]
-            baseline = compute_baseline_from_swing_features_nopandas(base_feats)
+            baseline = compute_baseline_from_swing_features(base_feats)
 
             if baseline:
-                swing_feats = apply_baseline_deltas_nopandas(swing_feats, baseline)
-                window_feats = apply_baseline_deltas_nopandas(window_feats, baseline)
+                swing_feats = apply_baseline_deltas(swing_feats, baseline)
+                window_feats = apply_baseline_deltas(window_feats, baseline)
 
     # --- Summary ---
     mdf_drops = [r.get('mdf_drop_pct') for r in swing_feats if r.get('mdf_drop_pct') is not None]
@@ -945,189 +961,10 @@ def stitch_decoded_session(
 # ============================
 # Real-time per-session fatigue monitor
 # ============================
-
-class FatigueMonitor:
-    """Stateful per-session fatigue tracker for real-time use.
-
-    Usage (called from analysis_bridge.py via Chaquopy):
-        monitor = FatigueMonitor(fs=2000.0)
-        monitor.reset()
-        result = monitor.push_swing(emg_raw_list, t_peak_ms, imu_peak_mag)
-        # result is a plain dict — JSON-serializable
-
-    Fatigue level (0-100):
-        0-33  = green  (fresh)
-        34-66 = yellow (moderate fatigue)
-        67-100 = red   (high fatigue — consider rest)
-
-    Baseline is established from the first `baseline_swings` swings
-    that occur after `warmup_skip_min` minutes.
-    """
-
-    def __init__(
-        self,
-        fs: float = 2000.0,
-        warmup_skip_min: float = 5.0,
-        baseline_swings: int = 20,
-        mdf_warn_pct: float = 12.0,
-        mdf_high_pct: float = 20.0,
-    ):
-        self._fs = float(fs)
-        self._warmup_skip_ms = warmup_skip_min * 60.0 * 1000.0
-        self._baseline_swings = int(baseline_swings)
-        self._mdf_warn_pct = float(mdf_warn_pct)   # yellow threshold
-        self._mdf_high_pct = float(mdf_high_pct)   # red threshold
-
-        # Session state
-        self._swing_id: int = 0
-        self._t_session_start_ms: Optional[float] = None
-        self._baseline_mdf: Optional[float] = None
-        self._baseline_rms: Optional[float] = None
-        self._baseline_samples: List[Tuple[float, float]] = []  # (mdf, rms)
-        self._history: List[dict] = []  # all swing results
-
-    def reset(self) -> None:
-        """Call at the start of each new session."""
-        self._swing_id = 0
-        self._t_session_start_ms = None
-        self._baseline_mdf = None
-        self._baseline_rms = None
-        self._baseline_samples = []
-        self._history = []
-
-    def push_swing(
-        self,
-        emg_raw: List[float],
-        t_peak_ms: float,
-        imu_peak_mag: float,
-    ) -> dict:
-        """Process one swing window and return fatigue metrics.
-
-        Args:
-            emg_raw:      raw EMG samples at self._fs Hz (700ms window = ~1400 samples)
-            t_peak_ms:    absolute time of swing peak in ms (from session start)
-            imu_peak_mag: IMU magnitude at swing peak (for effort proxy)
-
-        Returns:
-            dict with keys:
-                swing_id        int
-                t_peak_ms       float
-                mdf             float  (Hz)
-                rms             float
-                env_mean        float
-                imu_peak_mag    float
-                mdf_drop_pct    float  (NaN until baseline established)
-                rms_increase_pct float (NaN until baseline established)
-                fatigue_pct     float  (0-100, NaN until baseline established)
-                fatigue_level   str    ("warming_up" | "fresh" | "moderate" | "high")
-                warning         bool
-                baseline_ready  bool
-                baseline_swings_collected int
-        """
-        t_peak_ms = float(t_peak_ms)
-        imu_peak_mag = float(imu_peak_mag)
-
-        # Record session start time on first swing
-        if self._t_session_start_ms is None:
-            self._t_session_start_ms = t_peak_ms
-
-        # Compute EMG features
-        raw = np.asarray(emg_raw, dtype=np.float64)
-        mdf_val = float('nan')
-        rms_val = float('nan')
-        env_mean = float('nan')
-
-        if raw.size >= 32:
-            proc = preprocess_emg(raw, self._fs)
-            _, mdf_val = mnf_mdf(proc, self._fs)
-            rms_val = float(np.sqrt(np.nanmean(proc * proc)))
-            env_mean = float(np.nanmean(np.abs(raw)))
-
-        # Baseline collection: after warmup, first N valid swings
-        t_elapsed_ms = t_peak_ms - self._t_session_start_ms
-        in_warmup = t_elapsed_ms < self._warmup_skip_ms
-        baseline_ready = self._baseline_mdf is not None
-
-        if not baseline_ready and not in_warmup:
-            if np.isfinite(mdf_val) and np.isfinite(rms_val):
-                self._baseline_samples.append((mdf_val, rms_val))
-                if len(self._baseline_samples) >= self._baseline_swings:
-                    mdfs = [s[0] for s in self._baseline_samples]
-                    rmss = [s[1] for s in self._baseline_samples]
-                    self._baseline_mdf = float(np.median(mdfs))
-                    self._baseline_rms = float(np.median(rmss))
-
-        # Fatigue deltas
-        mdf_drop_pct = float('nan')
-        rms_increase_pct = float('nan')
-        fatigue_pct = float('nan')
-        warning = False
-
-        if baseline_ready and np.isfinite(mdf_val):
-            if self._baseline_mdf and self._baseline_mdf > 0:
-                mdf_drop_pct = (self._baseline_mdf - mdf_val) / self._baseline_mdf * 100.0
-            if self._baseline_rms and self._baseline_rms > 0 and np.isfinite(rms_val):
-                rms_increase_pct = (rms_val - self._baseline_rms) / self._baseline_rms * 100.0
-
-            # Fatigue % based on MDF drop (clamped 0-100)
-            if np.isfinite(mdf_drop_pct):
-                fatigue_pct = float(np.clip(mdf_drop_pct / self._mdf_high_pct * 100.0, 0.0, 100.0))
-                warning = mdf_drop_pct >= self._mdf_warn_pct
-
-        # Fatigue level label
-        if in_warmup or not baseline_ready:
-            level = "warming_up"
-        elif not np.isfinite(fatigue_pct):
-            level = "unknown"
-        elif fatigue_pct < 33.0:
-            level = "fresh"
-        elif fatigue_pct < 67.0:
-            level = "moderate"
-        else:
-            level = "high"
-
-        result = {
-            "swing_id": int(self._swing_id),
-            "t_peak_ms": t_peak_ms,
-            "mdf": round(mdf_val, 2) if np.isfinite(mdf_val) else None,
-            "rms": round(rms_val, 4) if np.isfinite(rms_val) else None,
-            "env_mean": round(env_mean, 2) if np.isfinite(env_mean) else None,
-            "imu_peak_mag": round(imu_peak_mag, 1),
-            "mdf_drop_pct": round(mdf_drop_pct, 2) if np.isfinite(mdf_drop_pct) else None,
-            "rms_increase_pct": round(rms_increase_pct, 2) if np.isfinite(rms_increase_pct) else None,
-            "fatigue_pct": round(fatigue_pct, 1) if np.isfinite(fatigue_pct) else None,
-            "fatigue_level": level,
-            "warning": bool(warning),
-            "baseline_ready": bool(baseline_ready),
-            "baseline_swings_collected": len(self._baseline_samples),
-            "baseline_mdf": round(self._baseline_mdf, 2) if self._baseline_mdf is not None else None,
-        }
-
-        self._history.append(result)
-        self._swing_id += 1
-        return result
-
-    def get_summary(self) -> dict:
-        """Return session summary dict (JSON-serializable)."""
-        n = len(self._history)
-        if n == 0:
-            return {"num_swings": 0, "baseline_ready": False}
-
-        mdfs = [r["mdf"] for r in self._history if r["mdf"] is not None]
-        drops = [r["mdf_drop_pct"] for r in self._history if r["mdf_drop_pct"] is not None]
-        warnings = sum(1 for r in self._history if r["warning"])
-
-        return {
-            "num_swings": n,
-            "baseline_ready": bool(self._baseline_mdf is not None),
-            "baseline_mdf": round(self._baseline_mdf, 2) if self._baseline_mdf is not None else None,
-            "baseline_rms": round(self._baseline_rms, 4) if self._baseline_rms is not None else None,
-            "latest_mdf": round(mdfs[-1], 2) if mdfs else None,
-            "latest_mdf_drop_pct": round(drops[-1], 2) if drops else None,
-            "max_mdf_drop_pct": round(max(drops), 2) if drops else None,
-            "warning_swings": warnings,
-            "fatigue_level": self._history[-1]["fatigue_level"] if self._history else "unknown",
-        }
+# FatigueMonitor lives in fatigue_monitor.py (canonical, pandas-free, Android-compatible).
+# Imported here so existing callers (analysis_bridge.py, etc.) continue to work unchanged.
+# Android deployment: fatigue_monitor.py must be present alongside this file.
+from fatigue_monitor import FatigueMonitor  # noqa: F401  (re-export)
 
 
 # ============================
@@ -1296,3 +1133,9 @@ def detect_swing_windows_from_imu_arrays(
     for i, r in enumerate(merged):
         r["swing_id"] = int(i)
     return merged
+
+
+# Alias: Windows emg_util.py uses detect_swings_from_imu (DataFrame-based);
+# Android uses detect_swing_windows_from_imu_arrays (array-based).
+# This alias lets callers use either name on Android.
+detect_swings_from_imu = detect_swing_windows_from_imu_arrays
