@@ -205,27 +205,8 @@ def filtfilt_safe(b, a, x: np.ndarray) -> np.ndarray:
     return filtfilt(b, a, x)
 
 
-def preprocess_emg(x: np.ndarray, fs: float) -> np.ndarray:
-    x = np.asarray(x, dtype=np.float64)
-    if x.size == 0:
-        return x
-
-    if _HAVE_SCIPY:
-        y = detrend(x, type="constant")
-        nyq = fs / 2.0
-        high = min(450.0, 0.95 * nyq)
-        if high <= 20.0:
-            return y
-        b, a = butter(4, [20.0 / nyq, high / nyq], btype="bandpass")
-        y = filtfilt_safe(b, a, y)
-        for f0 in (60.0, 120.0):
-            if f0 < nyq - 1:
-                b, a = iirnotch(w0=f0 / nyq, Q=30.0)
-                y = filtfilt_safe(b, a, y)
-        return y
-
-    # Numpy-only fallback: simple DC removal
-    return x - np.nanmean(x)
+# preprocess_emg is the single source of truth in fatigue_monitor.py.
+# Imported below alongside FatigueMonitor — do NOT define it here.
 
 
 def envelope(x: np.ndarray, fs: float, cutoff_hz: float = 3.6) -> np.ndarray:
@@ -964,7 +945,7 @@ def stitch_decoded_session(
 # FatigueMonitor lives in fatigue_monitor.py (canonical, pandas-free, Android-compatible).
 # Imported here so existing callers (analysis_bridge.py, etc.) continue to work unchanged.
 # Android deployment: fatigue_monitor.py must be present alongside this file.
-from fatigue_monitor import FatigueMonitor  # noqa: F401  (re-export)
+from fatigue_monitor import FatigueMonitor, preprocess_emg  # noqa: F401  (re-export)
 
 
 # ============================

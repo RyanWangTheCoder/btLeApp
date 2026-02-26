@@ -160,9 +160,14 @@ every few minutes (watchdog timeout ~30s); a break between sessions is at least
   - `detect_swing_windows_from_imu_arrays` is a thin DataFrame-building wrapper on Windows
 
 ### `fatigue_monitor.py`  ← single source of truth, shared with PC
-- Canonical `FatigueMonitor` — pure numpy + stdlib, runs identically on PC and Android.
+- Canonical `FatigueMonitor` and `preprocess_emg` — pure numpy + stdlib, runs identically on PC and Android.
 - **Source of truth: `emg_util/fatigue_monitor.py`.**
-- This file is a copy refreshed before each APK build:
+- Exports:
+  - `preprocess_emg(x, fs)` — **public API** for EMG bandpass filter (50–450 Hz + 60/120 Hz notch).
+    This is the **single source of truth for filter parameters** across PC and Android.
+    Both `emg_util.py` and `emg_util_nopandas.py` import `preprocess_emg` from here — they do NOT define their own copies.
+  - `FatigueMonitor` — stateful per-session fatigue tracker.
+- This file is a copy refreshed before each APK build (and whenever filter parameters change):
   ```
   copy emg_util\fatigue_monitor.py btLeApp\app\src\main\python\fatigue_monitor.py
   ```
@@ -212,6 +217,7 @@ The decoded CSV folder can be transferred to PC and analyzed directly with
 
 | Scenario | Action |
 |----------|--------|
+| **EMG filter parameters change** | Edit **only** `emg_util/fatigue_monitor.py`, then `copy emg_util\fatigue_monitor.py btLeApp\app\src\main\python\fatigue_monitor.py`. Do NOT edit `emg_util.py` or `emg_util_nopandas.py` — they import `preprocess_emg` from `fatigue_monitor`. |
 | `FatigueMonitor` logic changes | Edit `emg_util/fatigue_monitor.py`, copy to `btLeApp/.../python/` before APK build |
 | Core EMG algorithm changes | Update `emg_util/emg_util.py` (PC), port changes to `emg_util_nopandas.py` (Android) |
 | Adding a new analysis function | Use the canonical name (no `_nopandas` suffix) in both files; old aliases remain for backward compat |
@@ -231,5 +237,8 @@ prohibitively large for APK packaging. The split is intentional:
 - **PC**: full-featured versions for exploratory analysis, plotting, batch processing.
 - **Android**: stripped numpy-only versions for real-time on-device inference.
 
-`FatigueMonitor` is the exception — designed pure-numpy from the start so it can be
-shared as a single file across both environments without modification.
+`FatigueMonitor` and `preprocess_emg` are the exceptions — designed pure-numpy from
+the start so they can be shared as a single file (`fatigue_monitor.py`) across both
+environments without modification. `emg_util.py` and `emg_util_nopandas.py` both
+import `preprocess_emg` from `fatigue_monitor.py` rather than defining their own copies,
+ensuring the filter parameters are always in sync.

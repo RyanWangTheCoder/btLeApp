@@ -45,8 +45,18 @@ def _filtfilt_safe(b, a, x: np.ndarray) -> np.ndarray:
     return filtfilt(b, a, x)
 
 
-def _preprocess_emg(x: np.ndarray, fs: float) -> np.ndarray:
-    """Detrend + 4th-order Butterworth bandpass (20–450 Hz) + 60/120 Hz notch filters."""
+def preprocess_emg(x: np.ndarray, fs: float) -> np.ndarray:
+    """Detrend + 4th-order Butterworth bandpass (50–450 Hz) + 60/120 Hz notch filters.
+
+    Public API — single source of truth for EMG preprocessing across PC and Android.
+    Imported by emg_util.py so the filter parameters live in exactly one place.
+
+    Low cutoff: 50 Hz (matches MyoWare hardware bandpass, suppresses motion artifact).
+    High cutoff: 450 Hz (below Nyquist for 2000 Hz sampling).
+    Notch: 60 Hz + 120 Hz (power-line interference).
+
+    Falls back to DC removal only when SciPy is unavailable (Android without SciPy).
+    """
     x = np.asarray(x, dtype=np.float64)
     if x.size == 0:
         return x
@@ -54,9 +64,9 @@ def _preprocess_emg(x: np.ndarray, fs: float) -> np.ndarray:
         y = detrend(x, type='constant')
         nyq = fs / 2.0
         high = min(450.0, 0.95 * nyq)
-        if high <= 20.0:
+        if high <= 50.0:
             return y
-        b, a = butter(4, [20.0 / nyq, high / nyq], btype='bandpass')
+        b, a = butter(4, [50.0 / nyq, high / nyq], btype='bandpass')
         y = _filtfilt_safe(b, a, y)
         for f0 in (60.0, 120.0):
             if f0 < nyq - 1:
@@ -65,6 +75,10 @@ def _preprocess_emg(x: np.ndarray, fs: float) -> np.ndarray:
         return y
     # Numpy-only fallback: simple DC removal
     return x - np.nanmean(x)
+
+
+# Private alias kept for internal use within this module
+_preprocess_emg = preprocess_emg
 
 
 def _mnf_mdf(x: np.ndarray, fs: float) -> Tuple[float, float]:
