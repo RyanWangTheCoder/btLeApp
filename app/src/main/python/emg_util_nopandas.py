@@ -586,19 +586,23 @@ def compute_swing_emg_features(
     mdf_pad_ms: float = 300.0,
     thr_zc: float = 0.01,
     thr_ssc: float = 0.01,
+    imu_ts_ms: Optional[np.ndarray] = None,
+    imu_acc_dyn: Optional[np.ndarray] = None,
 ) -> List[Dict[str, float]]:
-    """Compute per-swing EMG features (pandas-free version of emg_util.compute_swing_emg_features).
+    """Compute per-swing EMG + IMU features (pandas-free version of emg_util.compute_swing_emg_features).
 
     MDF is computed on a padded window (±mdf_pad_ms) for PSD stability.
     Envelope features use the exact swing window.
 
     Args:
-        proc:        preprocessed EMG signal
-        env:         envelope signal
-        emg_ts_ms:   timestamp array (ms) aligned with proc/env
-        emg_fs_hz:   EMG sampling rate
-        swings:      list of dicts with keys: swing_id, t_start_ms, t_peak_ms, t_end_ms, peak_z, peak_mag
-        mdf_pad_ms:  padding around swing window for MDF computation
+        proc:         preprocessed EMG signal
+        env:          envelope signal
+        emg_ts_ms:    timestamp array (ms) aligned with proc/env
+        emg_fs_hz:    EMG sampling rate
+        swings:       list of dicts with keys: swing_id, t_start_ms, t_peak_ms, t_end_ms, peak_z, peak_mag
+        mdf_pad_ms:   padding around swing window for MDF computation
+        imu_ts_ms:    optional IMU timestamp array (ms) — enables imu_mean_acc_dyn / imu_peak_acc_dyn
+        imu_acc_dyn:  optional |acc_mag - 1g| array aligned with imu_ts_ms (physical units, g)
 
     Returns:
         list of dicts with per-swing features
@@ -634,6 +638,17 @@ def compute_swing_emg_features(
 
         mnf_val, mdf_val = mnf_mdf(seg, emg_fs_hz)
 
+        # IMU accelerometer features (optional — requires physical-unit IMU data in g)
+        imu_mean_acc_dyn = float('nan')
+        imu_peak_acc_dyn = float('nan')
+        if imu_ts_ms is not None and imu_acc_dyn is not None and imu_ts_ms.size > 0:
+            ia0 = int(np.searchsorted(imu_ts_ms, t0, side='left'))
+            ia1 = int(np.searchsorted(imu_ts_ms, t1, side='right'))
+            seg_acc = imu_acc_dyn[ia0:ia1]
+            if seg_acc.size > 0:
+                imu_mean_acc_dyn = float(np.nanmean(seg_acc))
+                imu_peak_acc_dyn = float(np.nanmax(seg_acc))
+
         rows.append({
             "swing_id": int(r['swing_id']),
             "t_start_ms": t0,
@@ -651,6 +666,8 @@ def compute_swing_emg_features(
             "ssc": feat_ssc(seg, thr=thr_ssc),
             "mnf": float(mnf_val),
             "mdf": float(mdf_val),
+            "imu_mean_acc_dyn": imu_mean_acc_dyn,
+            "imu_peak_acc_dyn": imu_peak_acc_dyn,
         })
 
     return rows
@@ -667,7 +684,12 @@ def select_baseline_swings(
     warmup_skip_swings: Optional[int] = None,
     baseline_swings: int = 20,
 ) -> List[Dict[str, float]]:
-    """Select baseline swings after warm-up (pandas-free version of emg_util.select_baseline_swings)."""
+    """Select baseline swings after warm-up (pandas-free version of emg_util.select_baseline_swings).
+
+    Prefers swings during active (work) periods (in_active==1) when available,
+    falling back to all post-warmup swings if there are not enough active-period swings.
+    This prevents rest-period swings (lower MDF) from contaminating the baseline.
+    """
     if not swings:
         return []
     sw = sorted(swings, key=lambda r: r['t_peak_ms'])
@@ -677,6 +699,10 @@ def select_baseline_swings(
         sw2 = sw
     if warmup_skip_swings is not None and int(warmup_skip_swings) > 0:
         sw2 = sw2[int(warmup_skip_swings):]
+    # Prefer active-period swings for baseline; fall back to all if not enough
+    active = [r for r in sw2 if r.get('in_active', 0) == 1]
+    if len(active) >= max(3, baseline_swings // 2):
+        sw2 = active
     return sw2[:int(baseline_swings)]
 
 
@@ -691,7 +717,7 @@ def compute_baseline_from_swing_features(
     base: Dict[str, float] = {}
     if not swing_feats:
         return base
-    for k in ['mdf', 'rms', 'mav', 'wl', 'emg_env_mean', 'emg_iemg']:
+    for k in ['mdf', 'rms', 'mav', 'wl', 'emg_env_mean', 'emg_iemg', 'imu_mean_acc_dyn']:
         vals = [r[k] for r in swing_feats if k in r and r[k] is not None and np.isfinite(r[k])]
         if vals:
             base[k] = float(np.median(vals))
@@ -707,7 +733,7 @@ def apply_baseline_deltas(
     base: Dict[str, float],
     prefix: str = '',
 ) -> List[Dict[str, float]]:
-    """Add mdf_drop_pct and rms_increase_pct to each row (pandas-free)."""
+    """Add mdf_drop_pct, rms_increase_pct, and acc_drop_pct to each row (pandas-free)."""
     out = []
     for r in rows:
         r2 = dict(r)
@@ -715,6 +741,15 @@ def apply_baseline_deltas(
             r2[prefix + 'mdf_drop_pct'] = (base['mdf'] - float(r2['mdf'])) / base['mdf'] * 100.0
         if 'rms' in r2 and 'rms' in base and base['rms'] and np.isfinite(base['rms']) and r2['rms'] is not None:
             r2[prefix + 'rms_increase_pct'] = (float(r2['rms']) - base['rms']) / base['rms'] * 100.0
+        if ('imu_mean_acc_dyn' in r2 and r2['imu_mean_acc_dyn'] is not None
+                and np.isfinite(float(r2['imu_mean_acc_dyn']))
+                and 'imu_mean_acc_dyn' in base and base['imu_mean_acc_dyn']
+                and np.isfinite(base['imu_mean_acc_dyn'])):
+            # acc_drop_pct > 0 means acc_dyn decreased (less force = fatigue)
+            r2[prefix + 'acc_drop_pct'] = (
+                (base['imu_mean_acc_dyn'] - float(r2['imu_mean_acc_dyn']))
+                / base['imu_mean_acc_dyn'] * 100.0
+            )
         out.append(r2)
     return out
 
@@ -866,6 +901,13 @@ def stitch_decoded_session(
         imu_gy = np.asarray(imu_gy_list, dtype=np.float64)[imu_order]
         imu_gz = np.asarray(imu_gz_list, dtype=np.float64)[imu_order]
 
+    # Compute |acc_mag - 1g| for per-swing IMU fatigue features (physical units, g)
+    # Only meaningful when IMU CSV has physical-unit data (acc_fsr_g written per row by decoder)
+    imu_acc_dyn: Optional[np.ndarray] = None
+    if imu_ts_ms.size > 0:
+        acc_mag = np.sqrt(imu_ax**2 + imu_ay**2 + imu_az**2)
+        imu_acc_dyn = np.abs(acc_mag - 1.0)  # remove gravity component
+
     # --- Windowed features ---
     _, feats_dict = compute_windowed_features(
         emg_raw,
@@ -900,6 +942,8 @@ def stitch_decoded_session(
             swing_feats = compute_swing_emg_features(
                 proc, env_sig, emg_ts_uniform, float(emg_fs_hz),
                 swing_windows, mdf_pad_ms=float(mdf_pad_ms),
+                imu_ts_ms=imu_ts_ms,
+                imu_acc_dyn=imu_acc_dyn,
             )
 
             # Baseline selection
@@ -918,6 +962,7 @@ def stitch_decoded_session(
 
     # --- Summary ---
     mdf_drops = [r.get('mdf_drop_pct') for r in swing_feats if r.get('mdf_drop_pct') is not None]
+    acc_drops = [r.get('acc_drop_pct') for r in swing_feats if r.get('acc_drop_pct') is not None]
     summary = {
         "num_emg_samples": int(emg_raw.size),
         "num_imu_samples": int(imu_ts_ms.size),
@@ -925,8 +970,10 @@ def stitch_decoded_session(
         "num_swings": len(swing_windows),
         "baseline_mdf": baseline.get('mdf'),
         "baseline_rms": baseline.get('rms'),
+        "baseline_imu_mean_acc_dyn": baseline.get('imu_mean_acc_dyn'),
         "max_mdf_drop_pct": float(max(mdf_drops)) if mdf_drops else None,
         "mean_mdf_drop_pct": float(np.mean(mdf_drops)) if mdf_drops else None,
+        "mean_acc_drop_pct": float(np.mean(acc_drops)) if acc_drops else None,
         "session_duration_s": float(emg_ts_ms[-1] - emg_ts_ms[0]) / 1000.0 if emg_ts_ms.size > 1 else 0.0,
     }
 
