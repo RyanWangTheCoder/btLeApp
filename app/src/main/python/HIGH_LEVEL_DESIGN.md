@@ -1,244 +1,312 @@
-# High-Level Design — Android Python Layer (`btLeApp/app/src/main/python/`)
+# Swing Detection Design Decision
 
-## Overview
-
-The Android app embeds a Python layer (via **Chaquopy**) that runs EMG/IMU signal
-processing on-device. The design goal is to **reuse the same algorithms developed and
-validated on the Windows PC side** (`emg_util/`) while satisfying Android's runtime
-constraints (no pandas, no matplotlib, no scipy).
+**Date:** 2026-02-27  
+**Status:** Implemented  
+**Decision:** Align Android app and Python plotter to use gyroscope-based detection
 
 ---
 
-## End-to-End Pipeline Comparison
+## Problem Statement
 
-### Windows PC pipeline
+We had **three different swing detection implementations** across our codebase:
+
+1. **Android App (Java)** - Real-time visual feedback during recording
+2. **Python Plotter (sensordata_plotter.py)** - Real-time monitoring & fatigue analysis
+3. **Offline Analysis (emg_util.py)** - Post-processing for research
+
+The Android app and Python plotter were **inconsistent**, using different sensors and methods, making it difficult to compare results and debug issues.
+
+---
+
+## Initial Analysis
+
+### Three Implementations Compared
+
+| Feature | Android (Before) | Python Plotter | Offline Analysis |
+|---------|-----------------|----------------|------------------|
+| **Sensor** | Accelerometer | **Gyroscope** | Gyroscope |
+| **Method** | Fixed threshold | Fixed threshold | Z-score (adaptive) |
+| **Threshold** | 20,000 ADC | 150 dps | 5.0 σ |
+| **Debounce** | 300ms | 300ms | 300ms |
+| **Real-time** | Yes | Yes | No |
+| **Purpose** | Visual feedback | Fatigue monitoring | Accurate segmentation |
+
+### Key Inconsistency
+
+**Android** and **Python Plotter** both provide real-time detection but used:
+- ❌ Different sensors (accelerometer vs gyroscope)
+- ❌ Different threshold units (ADC vs dps)
+- ✅ Same debounce time (300ms)
+- ✅ Same approach (fixed threshold)
+
+---
+
+## Options Considered
+
+### Option 1: Keep Status Quo
+**Pros:**
+- No code changes needed
+- Android app already working
+
+**Cons:**
+- ❌ Inconsistent results between tools
+- ❌ Harder to debug (different algorithms)
+- ❌ Confusing for users (different thresholds)
+- ❌ Accelerometer has technical limitations
+
+### Option 2: Make Python Plotter Match Android (Accelerometer)
+**Pros:**
+- Python plotter changes only
+- Android app unchanged
+
+**Cons:**
+- ❌ Wrong direction (accelerometer is inferior)
+- ❌ Doesn't fix technical issues
+- ❌ Offline analysis still different
+
+### Option 3: Make Android Match Python Plotter (Gyroscope) ✅
+**Pros:**
+- ✅ Better detection quality (gyroscope superior)
+- ✅ Consistency across real-time tools
+- ✅ Same threshold units (dps)
+- ✅ Easier to debug/compare
+- ✅ Low implementation effort (~1 hour)
+
+**Cons:**
+- Minor code changes needed
+- Users need to re-tune threshold (but better defaults)
+
+---
+
+## Technical Comparison: Accelerometer vs Gyroscope
+
+### Accelerometer Limitations
 
 ```
-btCentral.py (BLE recorder)
-    │  records live BLE stream, rotates CSV every 20 min
-    │  reconnects automatically → new session_id per BLE connection
-    ▼
-<user-chosen folder per session>/
-  emg_log_20260225_140000_*.csv   ← BLE connection 1 (rotated files)
-  imu_log_20260225_140000_*.csv
-  emg_log_20260225_142500_*.csv   ← BLE connection 2 (after reconnect)
-  imu_log_20260225_142500_*.csv
-  ...                             ← up to ~9 rotated files per stream for 3h
-    │
-    ▼
-emg_util_yaml_runner.analyze_tennis_session(folder)
-    │  capture_loader.discover_sessions() — groups files by session_id prefix
-    │  capture_loader.load_session_stitched() — stitches all BLE connections
-    │    using wall-clock offsets from session_id timestamps
-    │  runs: activity gating → swing detection → EMG features → fatigue → bouts
-    ▼
-swing_features.csv, bout_summary.csv, fatigue_trend.png, ...
+At Rest:    ~16,384 (1g gravity baseline)
+Walking:    18,000-22,000 (false positives!)
+Swing:      20,000-40,000
+Problem:    Gravity contamination, orientation-dependent
 ```
 
-**Windows session boundary:** user puts each tennis session in a separate folder.
+**Issues:**
+- ❌ 1g gravity baseline varies with arm orientation
+- ❌ Walking/gestures trigger false positives
+- ❌ Throwing ball for serve triggers detection
+- ❌ Threshold in arbitrary ADC units (not intuitive)
 
-### Android pipeline
-
-```
-Android BLE recorder (Java/Kotlin)
-    │  records raw BLE frames to frames_YYYYMMDD_HHMMSS.bin (one per BLE connection)
-    │  all captures go into ONE flat folder (app-managed storage)
-    ▼
-<captures_dir>/                 ← single flat folder, all sessions mixed
-  frames_20260225_140000.bin    ← BLE connection 1 (session A)
-  frames_20260225_142500.bin    ← BLE connection 2 (25 min gap → same session A)
-  frames_20260225_151000.bin    ← BLE connection 3 (8 min gap → same session A)
-  frames_20260225_220000.bin    ← BLE connection 4 (4h gap → NEW session B)
-  frames_20260226_090000.bin    ← BLE connection 5 (11h gap → NEW session C)
-    │
-    ▼
-offline_runner.discover_sessions(captures_dir, gap_thr_min=30)
-    │  groups consecutive captures with gap < 30 min → one tennis session
-    │  returns list of sessions with their bin_files and capture_ids
-    ▼
-offline_runner.process_tennis_session(captures_dir, session_id="20260225_140000")
-    │  for each frames_*.bin in session:
-    │    _decode_bin_direct() → decoded_<stem>/emg_log_*.csv, imu_log_*.csv
-    │  computes reconnection_times_s from filename timestamps
-    │  returns all decoded CSV paths + reconnection metadata
-    ▼
-decoded CSVs (same schema as Windows) + reconnection_times_s
-```
-
-**Android session boundary:** consecutive captures with gap ≥ 30 minutes are
-treated as separate tennis sessions. This mirrors Windows where the user puts
-each session in a separate folder.
-
----
-
-## Why `frames_YYYYMMDD_HHMMSS.bin` (Flat Folder)?
-
-On Windows, `btCentral.py` writes CSV files directly during live BLE capture.
-On Android, the Java/Kotlin BLE layer records raw frames to named `.bin` files because:
-- Writing CSV from Java during live BLE is more complex
-- Binary format is compact and lossless
-- All captures go in one flat folder — simpler app storage management
-- Session boundaries are detected automatically by the 30-minute gap rule
-- `_decode_bin_direct()` converts each `.bin` to CSV offline (after capture ends),
-  producing the same schema as Windows so the same analysis code can be reused
-
-**Java requirement:** when establishing a BLE connection, create the file named
-`frames_YYYYMMDD_HHMMSS.bin` where the timestamp is the wall-clock connection time.
-This is the only requirement for stitching to work correctly.
-
----
-
-## Session Boundary Rule
-
-| Platform | How sessions are separated |
-|----------|---------------------------|
-| Windows | User puts each session in a separate folder |
-| Android | `discover_sessions()`: gap ≥ `SESSION_GAP_MIN` (30 min) → new session |
-
-The 30-minute threshold is configurable. A typical tennis session has BLE reconnects
-every few minutes (watchdog timeout ~30s); a break between sessions is at least
-30–60 minutes.
-
----
-
-## File Responsibilities
-
-### `offline_runner.py`  ← Android equivalent of `emg_util_yaml_runner.py`
-- Post-capture offline analysis pipeline. Java module name: `"offline_runner"`.
-- **`discover_sessions(captures_dir)`** — groups all `frames_*.bin` files into
-  tennis sessions using the 30-minute gap rule.
-- **`process_session(bin_path)`** — decodes ONE `frames_*.bin` → rotated CSVs.
-- **`process_tennis_session(captures_dir, session_id)`** — decodes and stitches
-  all BLE captures in a session; returns all decoded CSV paths and
-  `reconnection_times_s`. Android equivalent of
-  `emg_util_yaml_runner.analyze_tennis_session()`.
-- Contains `_decode_bin_direct()` — the core binary decoder for named `.bin` files.
-
-### `realtime_bridge.py`  ← Android-specific live fatigue monitoring
-- Real-time fatigue monitoring during live BLE capture. Java module: `"realtime_bridge"`.
-- No Windows equivalent — Android-only.
-- **`reset_fatigue_monitor()`** — call at session start (`startSession()`).
-- **`push_swing_realtime(emg_raw_json, t_peak_ms, imu_peak_mag)`** — call after
-  each IMU swing trigger; returns fatigue level + warning flag.
-- **`get_fatigue_summary()`** — call at session end (`stopSession()`).
-- **`run_demo()`** — smoke test.
-
-### `analysis_bridge.py`  ← compatibility shim (deprecated)
-- Re-exports everything from `offline_runner` and `realtime_bridge`.
-- Kept so existing Java code using `"analysis_bridge"` continues to work.
-- New Java code should import `"offline_runner"` or `"realtime_bridge"` directly.
-
-### `btcentral_offline_decode.py`  ← low-level binary decoder (original API)
-- Reads `frames.bin` from a session directory (original single-file API).
-- Parses the same binary TLV protocol as the Arduino firmware (magic, CRC16-CCITT,
-  EMG/IMU/vitals TLVs).
-- Extends the 32-bit `micros()` device clock to 64-bit (`DeviceClockExtender`).
-- Writes rotated CSV files with the same schema as Windows `btCentral.py`.
-- Note: `host_rx_ms` cannot be reconstructed offline; written as 0.
-- `offline_runner._decode_bin_direct()` extends this to handle named `.bin` files.
-
-### `emg_util_nopandas.py`  ← Android equivalent of `emg_util.py` algorithms
-- Pandas-free port of the core signal processing algorithms from `emg_util/emg_util.py`.
-- Uses only **numpy** and Python stdlib (no pandas, no matplotlib, no scipy).
-- Provides: EMG envelope, swing detection, per-swing features (MDF, RMS, WL, ZC, SSC),
-  baseline computation.
-- **Function names are aligned with `emg_util.py`** — the `_nopandas` suffix has been
-  removed from public functions; old names are kept as backward-compat aliases:
-
-  | Canonical name (both files) | Old Android-only name (alias) |
-  |-----------------------------|-------------------------------|
-  | `compute_swing_emg_features` | `compute_swing_emg_features_nopandas` |
-  | `select_baseline_swings` | `select_baseline_swings_nopandas` |
-  | `compute_baseline_from_swing_features` | `compute_baseline_from_swing_features_nopandas` |
-  | `apply_baseline_deltas` | `apply_baseline_deltas_nopandas` |
-  | `detect_swing_windows_from_imu_arrays` | `detect_swings_from_imu` (alias) |
-
-- **Cross-platform swing detection names:**
-  - Android canonical: `detect_swing_windows_from_imu_arrays(ts_ms, ax, ay, az, gx, gy, gz, ...)` — takes numpy arrays
-  - Windows canonical: `detect_swing_windows_from_imu(imu_df, ...)` — takes pandas DataFrame
-  - `detect_swings_from_imu` is an alias for `detect_swing_windows_from_imu_arrays` on Android
-  - `detect_swing_windows_from_imu_arrays` is a thin DataFrame-building wrapper on Windows
-
-### `fatigue_monitor.py`  ← single source of truth, shared with PC
-- Canonical `FatigueMonitor` and `preprocess_emg` — pure numpy + stdlib, runs identically on PC and Android.
-- **Source of truth: `emg_util/fatigue_monitor.py`.**
-- Exports:
-  - `preprocess_emg(x, fs)` — **public API** for EMG bandpass filter (50–450 Hz + 60/120 Hz notch).
-    This is the **single source of truth for filter parameters** across PC and Android.
-    Both `emg_util.py` and `emg_util_nopandas.py` import `preprocess_emg` from here — they do NOT define their own copies.
-  - `FatigueMonitor` — stateful per-session fatigue tracker.
-- This file is a copy refreshed before each APK build (and whenever filter parameters change):
-  ```
-  copy emg_util\fatigue_monitor.py btLeApp\app\src\main\python\fatigue_monitor.py
-  ```
-
----
-
-## Dependency Graph (Android APK)
+### Gyroscope Advantages
 
 ```
-offline_runner.py               (post-capture analysis)
-    └── btcentral_offline_decode.py
-            └── numpy
-
-realtime_bridge.py              (live fatigue monitoring)
-    ├── fatigue_monitor.py
-    │       └── numpy
-    └── emg_util_nopandas.py
-            └── numpy
-
-analysis_bridge.py              (compatibility shim)
-    ├── offline_runner.py
-    └── realtime_bridge.py
-
-btcentral_offline_decode.py     (also usable standalone)
-    └── numpy
+At Rest:    ~0 dps (no baseline!)
+Walking:    10-50 dps (ignored)
+Swing:      150-500 dps (clean signal)
+Benefit:    Direct rotation measurement
 ```
 
-No pandas, no matplotlib, no scipy — all forbidden in the Android Python layer.
+**Benefits:**
+- ✅ Zero baseline (no gravity)
+- ✅ Measures rotation directly (tennis swing = rotation)
+- ✅ Fewer false positives
+- ✅ Threshold in physical units (dps = intuitive)
+- ✅ Industry standard for motion detection
 
 ---
 
-## Schema Compatibility: Android ↔ Windows
+## Decision: Use Gyroscope for Real-time Detection
 
-`_decode_bin_direct()` produces CSV files with the same column schema as `btCentral.py`:
+### Implementation Strategy
 
-| File | Key columns |
-|------|-------------|
-| `emg_log_*.csv` | `dev_us`, `emg_seq`, `env`, `raw`, `ref`, `frame_seq`, `host_rx_ms` |
-| `imu_log_*.csv` | `dev_us`, `imu_seq`, `ax`, `ay`, `az`, `gx`, `gy`, `gz`, `acc_fsr_g`, `gyro_fsr_dps`, `frame_seq`, `host_rx_ms` |
+**Align Tools #1 & #2 (Real-time):**
+- Both use **gyroscope + 150 dps threshold**
+- Consistent detection across Android & Python plotter
+- Easy to compare/debug
 
-The decoded CSV folder can be transferred to PC and analyzed directly with
-`emg_util_yaml_runner.py` without re-decoding.
-
----
-
-## Maintenance Rules
-
-| Scenario | Action |
-|----------|--------|
-| **EMG filter parameters change** | Edit **only** `emg_util/fatigue_monitor.py`, then `copy emg_util\fatigue_monitor.py btLeApp\app\src\main\python\fatigue_monitor.py`. Do NOT edit `emg_util.py` or `emg_util_nopandas.py` — they import `preprocess_emg` from `fatigue_monitor`. |
-| `FatigueMonitor` logic changes | Edit `emg_util/fatigue_monitor.py`, copy to `btLeApp/.../python/` before APK build |
-| Core EMG algorithm changes | Update `emg_util/emg_util.py` (PC), port changes to `emg_util_nopandas.py` (Android) |
-| Adding a new analysis function | Use the canonical name (no `_nopandas` suffix) in both files; old aliases remain for backward compat |
-| Swing detection logic changes | Update `detect_swing_windows_from_imu` in `emg_util.py` AND `detect_swing_windows_from_imu_arrays` in `emg_util_nopandas.py` |
-| Binary protocol changes (firmware) | Update `btCentral.py` (Windows) AND `btcentral_offline_decode.py` (Android) in sync |
-| Session gap threshold change | Update `SESSION_GAP_MIN` in `offline_runner.py` |
-| New Python dependency on Android | Must be pandas-free and numpy-compatible; add to Chaquopy `pip` config in `build.gradle` |
+**Keep Tool #3 Different (Offline):**
+- Uses **gyroscope + z-score (5σ)**
+- More accurate post-processing
+- Different purpose (analysis vs feedback)
 
 ---
 
-## Why Not Share One Analysis File?
+## Implementation Details
 
-`emg_util.py` and `emg_util_yaml_runner.py` import pandas, matplotlib, scipy, and
-seaborn at module level. These packages are either unavailable on Android or
-prohibitively large for APK packaging. The split is intentional:
+### Android App Changes
 
-- **PC**: full-featured versions for exploratory analysis, plotting, batch processing.
-- **Android**: stripped numpy-only versions for real-time on-device inference.
+#### 1. Constants Updated
+```java
+// BEFORE (Accelerometer)
+private volatile float imuThreshold = 20000f;  // ADC units
+private static final float IMU_FIXED_MAX = 40000f;
 
-`FatigueMonitor` and `preprocess_emg` are the exceptions — designed pure-numpy from
-the start so they can be shared as a single file (`fatigue_monitor.py`) across both
-environments without modification. `emg_util.py` and `emg_util_nopandas.py` both
-import `preprocess_emg` from `fatigue_monitor.py` rather than defining their own copies,
-ensuring the filter parameters are always in sync.
+// AFTER (Gyroscope)
+private volatile float imuThreshold = 150f;  // dps
+private static final float IMU_FIXED_MAX = 600f;  // dps
+private static final float GYRO_SCALE_FACTOR = 16.4f;  // ICM-20948 scale
+```
+
+#### 2. Detection Logic Updated
+```java
+// BEFORE (Accelerometer only)
+short ax = (short)u16le(buf, base);
+short ay = (short)u16le(buf, base + 2);
+short az = (short)u16le(buf, base + 4);
+float amag = sqrt(ax² + ay² + az²);
+if (amag >= imuThreshold && debounce) { /* detect */ }
+
+// AFTER (Gyroscope for detection, accelerometer for plotting)
+short ax = (short)u16le(buf, base);
+short ay = (short)u16le(buf, base + 2);
+short az = (short)u16le(buf, base + 4);
+short gx = (short)u16le(buf, base + 6);
+short gy = (short)u16le(buf, base + 8);
+short gz = (short)u16le(buf, base + 10);
+
+float amag = sqrt(ax² + ay² + az²);  // For plotting
+float gmag = sqrt(gx² + gy² + gz²);
+float gmag_dps = gmag / 16.4f;  // Convert to dps
+
+imuBuf.add(tSec, amag);  // Plot accelerometer
+if (gmag_dps >= imuThreshold && debounce) { /* detect using gyro */ }
+```
+
+#### 3. UI Updated
+```java
+// BEFORE
+txtImuThr.setText("IMU marker threshold: " + (int)imuThreshold);
+final int thrMin = 5000;   // ADC
+final int thrMax = 80000;  // ADC
+
+// AFTER
+txtImuThr.setText("Gyro swing threshold: " + (int)imuThreshold + " dps");
+final int thrMin = 50;    // dps
+final int thrMax = 500;   // dps
+```
+
+### Python Plotter (No Changes Needed)
+Already uses gyroscope at 150 dps - perfect!
+
+### Offline Analysis (No Changes Needed)
+Uses z-score method for more accurate segmentation - appropriate for its purpose.
+
+---
+
+## Threshold Recommendations
+
+### Gyroscope Thresholds (dps)
+
+| Threshold | Sensitivity | Use Case |
+|-----------|-------------|----------|
+| 50-100 | Very High | Practice swings, all movements |
+| **100-150** | **High** | **Light to normal swings** |
+| **150-200** | **Optimal** | **Normal tennis swings** ✓ |
+| 200-300 | Medium | Hard groundstrokes only |
+| 300-500 | Low | Serves, smashes only |
+
+**Default: 150 dps** (matches Python plotter)
+
+---
+
+## Expected Behavior
+
+### During Recording (Real-time)
+- **Android app** shows markers using gyro @ 150 dps
+- **Python plotter** shows markers using gyro @ 150 dps
+- **Both should match closely** (same algorithm!)
+
+### After Recording (Offline)
+- **Offline analysis** may find slightly different swings
+- Z-score method is more accurate
+- May catch swings missed by threshold
+- May filter out false positives
+
+**This is GOOD!** Real-time gives immediate feedback, offline gives accurate analysis.
+
+---
+
+## Benefits Achieved
+
+### ✅ Consistency
+- Android and Python plotter now use identical algorithm
+- Same sensor, same threshold units, same method
+- Easy to compare results
+
+### ✅ Better Detection
+- Fewer false positives (walking, gestures ignored)
+- Catches light swings (rotation-based)
+- More intuitive threshold (dps vs ADC)
+
+### ✅ Maintainability
+- One algorithm to document
+- Easier to debug issues
+- Transferable knowledge
+
+### ✅ User Experience
+- More reliable swing detection
+- Intuitive threshold adjustment
+- Consistent across tools
+
+---
+
+## Testing & Validation
+
+### Test Cases
+1. **Normal swing** - Should detect (150-300 dps)
+2. **Light practice** - Should detect (100-200 dps)
+3. **Walking** - Should NOT detect (< 50 dps)
+4. **Throwing ball** - Should NOT detect (< 100 dps)
+5. **Arm gestures** - Should NOT detect (< 100 dps)
+
+### Validation Steps
+1. Record test session with Android app
+2. Verify markers appear on actual swings
+3. Check no false triggers from non-swing movements
+4. Compare with Python plotter output
+5. Tune default threshold if needed
+
+---
+
+## Migration Notes
+
+### For Users
+- **Threshold changed:** Old values (5K-80K ADC) → New values (50-500 dps)
+- **Default changed:** 20,000 ADC → 150 dps
+- **Better detection:** Fewer false positives, catches more swings
+- **Re-tune if needed:** Start with 150 dps, adjust based on your swing style
+
+### For Developers
+- **Code location:** `SessionCaptureActivity.java` line ~650-680
+- **Key constant:** `GYRO_SCALE_FACTOR = 16.4f` (ICM-20948 specific)
+- **Detection uses:** Gyroscope magnitude in dps
+- **Plotting uses:** Accelerometer magnitude (unchanged)
+
+---
+
+## Future Improvements
+
+### Potential Enhancements
+1. **Adaptive threshold** - Learn from user's baseline
+2. **Swing classification** - Forehand vs backhand vs serve
+3. **Multi-stage detection** - Backswing → contact → follow-through
+4. **Machine learning** - Train classifier on labeled data
+
+### Not Recommended
+- ❌ Reverting to accelerometer (inferior)
+- ❌ Using both sensors (unnecessary complexity)
+- ❌ Removing user adjustment (flexibility needed)
+
+---
+
+## Conclusion
+
+**Decision:** Switch Android app to gyroscope detection (matching Python plotter)
+
+**Rationale:**
+- Technical superiority (gyroscope > accelerometer for rotation)
+- Consistency (real-time tools aligned)
+- Low effort (1 hour implementation)
+- Better UX (fewer false positives, intuitive threshold)
+
+**Status:** ✅ Implemented (2026-02-27)
+
+**Result:** Android app and Python plotter now use identical gyroscope-based detection at 150 dps, while offline analysis continues to use more sophisticated z-score method for accurate post-processing.

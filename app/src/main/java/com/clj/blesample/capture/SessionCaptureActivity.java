@@ -63,6 +63,7 @@ public class SessionCaptureActivity extends AppCompatActivity {
     private static final int TLV_VITALS = 0x03;
 
     private static final int ENV_PLOT_HZ = 50;
+    private static final int IMU_PLOT_HZ = 200;  // Plot IMU at full rate for smooth waveforms
     private volatile int rawPlotHz = 500;
 
     // ── Fatigue monitoring ──────────────────────────────────────────────────
@@ -86,6 +87,7 @@ public class SessionCaptureActivity extends AppCompatActivity {
     private Switch swFreeze;
     private Button btnWindow;
     private Button btnRawHz;
+    private Button btnImuScale;
     private TextView txtImuThr;
     private SeekBar seekImuThr;
     private SimplePlotView emgPlot;
@@ -111,7 +113,7 @@ public class SessionCaptureActivity extends AppCompatActivity {
     private final RingBufferF emgRawBuf = new RingBufferF(12000);
     private final RingBufferF emgEnvBuf = new RingBufferF(2000);
     private final RingBufferF emgFiltBuf = new RingBufferF(2000);
-    private final RingBufferF imuBuf = new RingBufferF(3000);
+    private final RingBufferF imuBuf = new RingBufferF(12000);  // 60 seconds @ 200Hz (was 3000 = 15s)
     private final MarkerBufferF markers = new MarkerBufferF(500);
 
     private final float[] xs0 = new float[12000];
@@ -120,8 +122,8 @@ public class SessionCaptureActivity extends AppCompatActivity {
     private final float[] ys1 = new float[2000];
     private final float[] xs2 = new float[2000];
     private final float[] ys2 = new float[2000];
-    private final float[] xsi = new float[3000];
-    private final float[] ysi = new float[3000];
+    private final float[] xsi = new float[12000];  // Match imuBuf size (was 3000)
+    private final float[] ysi = new float[12000];  // Match imuBuf size (was 3000)
     private final float[] tmk = new float[500];
 
     private volatile long t0SessionUs = -1;
@@ -131,9 +133,20 @@ public class SessionCaptureActivity extends AppCompatActivity {
     private volatile boolean frozen = false;
     private volatile float windowSec = 10f;
 
-    private volatile float imuThreshold = 20000f;
+    private volatile float imuThreshold = 150f;  // Gyroscope threshold in dps (degrees per second)
     private volatile long lastMarkerUs = 0;
-    private static final long MARKER_DEBOUNCE_US = 300_000;
+    private static final long MARKER_DEBOUNCE_US = 1_000_000;  // 1 second debounce
+    
+    // Peak detection state
+    private volatile float lastGyroMag = 0f;
+    private volatile boolean inPeak = false;
+    private volatile float peakGyroMag = 0f;
+    private volatile long peakTimeUs = 0;
+    
+    private volatile boolean imuScaleAuto = true;  // true=Auto, false=Fixed
+    private static final float IMU_FIXED_MIN = 0f;
+    private static final float IMU_FIXED_MAX = 600f;  // Gyro range: 0-600 dps
+    private static final float GYRO_SCALE_FACTOR = 16.4f;  // ICM-20948: ±2000dps range, 32768/2000 = 16.4 LSB/dps
 
     private float envLpf = 0f;
     private float envAlpha = alphaForCutoff(3.6f, ENV_PLOT_HZ);
@@ -199,27 +212,37 @@ public class SessionCaptureActivity extends AppCompatActivity {
         });
 
         btnWindow.setOnClickListener(v -> {
-            windowSec = (windowSec < 15f) ? 20f : 10f;
-            btnWindow.setText("Window: " + (int)windowSec + "s");
+            // Cycle through 5s -> 10s -> 20s -> 5s
+            if (windowSec <= 5f) windowSec = 10f;
+            else if (windowSec <= 10f) windowSec = 20f;
+            else windowSec = 5f;
+            btnWindow.setText("Win:" + (int)windowSec + "s");
             if (frozen) frozenNowSec = latestNowSec();
         });
-        btnWindow.setText("Window: 10s");
+        btnWindow.setText("Win:10s");
 
         btnRawHz.setOnClickListener(v -> {
             rawPlotHz = (rawPlotHz == 500) ? 250 : 500;
-            btnRawHz.setText("RAW: " + rawPlotHz + "Hz");
+            btnRawHz.setText("RAW:" + rawPlotHz);
         });
-        btnRawHz.setText("RAW: 500Hz");
+        btnRawHz.setText("RAW:500");
 
-        final int thrMin = 5000;
-        final int thrMax = 80000;
+        btnImuScale = findViewById(R.id.btnImuScale);
+        btnImuScale.setOnClickListener(v -> {
+            imuScaleAuto = !imuScaleAuto;
+            btnImuScale.setText(imuScaleAuto ? "IMU:Auto" : "IMU:Fix");
+        });
+        btnImuScale.setText("IMU:Auto");
+
+        final int thrMin = 50;   // 50 dps minimum
+        final int thrMax = 500;  // 500 dps maximum
         seekImuThr.setMax(thrMax - thrMin);
         seekImuThr.setProgress((int)(imuThreshold - thrMin));
-        txtImuThr.setText("IMU marker threshold: " + (int)imuThreshold);
+        txtImuThr.setText("Gyro swing threshold: " + (int)imuThreshold + " dps");
         seekImuThr.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 imuThreshold = thrMin + progress;
-                txtImuThr.setText("IMU marker threshold: " + (int)imuThreshold);
+                txtImuThr.setText("Gyro swing threshold: " + (int)imuThreshold + " dps");
             }
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
             @Override public void onStopTrackingTouch(SeekBar seekBar) {}
@@ -684,7 +707,8 @@ public class SessionCaptureActivity extends AppCompatActivity {
 
         long t0Us = tFrameUs + t0Off;
         float stepUs = (srHz > 0) ? (1_000_000f / (float)srHz) : 0f;
-        int imuDecim = Math.max(1, srHz / ENV_PLOT_HZ);
+        // NO decimation - plot every IMU sample for smooth waveforms
+        // int imuDecim = Math.max(1, srHz / IMU_PLOT_HZ);
 
         for (int i = 0; i < count; i++) {
             long devUs = (long)(t0Us + i * stepUs);
@@ -694,24 +718,55 @@ public class SessionCaptureActivity extends AppCompatActivity {
             short ax = (short)u16le(buf, base);
             short ay = (short)u16le(buf, base + 2);
             short az = (short)u16le(buf, base + 4);
+            short gx = (short)u16le(buf, base + 6);
+            short gy = (short)u16le(buf, base + 8);
+            short gz = (short)u16le(buf, base + 10);
+            
+            // Calculate accelerometer magnitude for plotting
             float amag = (float)Math.sqrt((double)ax*ax + (double)ay*ay + (double)az*az);
+            
+            // Calculate gyroscope magnitude for swing detection
+            float gmag = (float)Math.sqrt((double)gx*gx + (double)gy*gy + (double)gz*gz);
+            float gmag_dps = gmag / GYRO_SCALE_FACTOR;  // Convert to degrees per second
 
-            long seq = seq0 + i;
-            if ((seq % imuDecim) == 0) {
-                imuBuf.add(tSec, amag);
-                if (amag >= imuThreshold && (devUs - lastMarkerUs) > MARKER_DEBOUNCE_US) {
-                    markers.add(tSec);
-                    lastMarkerUs = devUs;
-
-                    // Snapshot the full-rate EMG ring buffer and queue for fatigue analysis.
-                    // offer() drops the job if the previous one is still being processed (depth=1).
-                    float[] emgSnap = emgFatigueBuf.snapshotY();
-                    if (emgSnap.length > 0) {
-                        float tPeakMs = tSec * 1000f;
-                        fatigueQueue.offer(new FatigueJob(emgSnap, tPeakMs, amag));
+            // Plot accelerometer magnitude (for visual reference)
+            imuBuf.add(tSec, amag);
+            
+            // Peak detection: only trigger on the HIGHEST point of the swing
+            // This prevents double-counting backswing + forward swing
+            if (gmag_dps >= imuThreshold) {
+                if (!inPeak) {
+                    // Start of new peak
+                    inPeak = true;
+                    peakGyroMag = gmag_dps;
+                    peakTimeUs = devUs;
+                } else {
+                    // Already in peak - update if this is higher
+                    if (gmag_dps > peakGyroMag) {
+                        peakGyroMag = gmag_dps;
+                        peakTimeUs = devUs;
                     }
                 }
+            } else if (inPeak) {
+                // Dropped below threshold - end of peak
+                // Trigger detection at the peak point (if debounce allows)
+                if ((peakTimeUs - lastMarkerUs) > MARKER_DEBOUNCE_US) {
+                    float peakTSec = (peakTimeUs - t0SessionUs) / 1_000_000f;
+                    markers.add(peakTSec);
+                    lastMarkerUs = peakTimeUs;
+
+                    // Snapshot EMG at peak time
+                    float[] emgSnap = emgFatigueBuf.snapshotY();
+                    if (emgSnap.length > 0) {
+                        float tPeakMs = peakTSec * 1000f;
+                        fatigueQueue.offer(new FatigueJob(emgSnap, tPeakMs, peakGyroMag));
+                    }
+                }
+                inPeak = false;
+                peakGyroMag = 0f;
             }
+            
+            lastGyroMag = gmag_dps;
         }
     }
 
@@ -733,17 +788,25 @@ public class SessionCaptureActivity extends AppCompatActivity {
         emgPlot.setMarkers(tmk, nMk);
         emgPlot.invalidate();
 
-        float imuMin = 0f, imuMax = 1f;
-        if (nImu > 1) {
-            imuMin = ysi[0]; imuMax = ysi[0];
-            for (int i = 1; i < nImu; i++) {
-                float v = ysi[i];
-                if (v < imuMin) imuMin = v;
-                if (v > imuMax) imuMax = v;
+        float imuMin, imuMax;
+        if (imuScaleAuto) {
+            // Auto-scaling: dynamically adjust to data range
+            imuMin = 0f; imuMax = 1f;
+            if (nImu > 1) {
+                imuMin = ysi[0]; imuMax = ysi[0];
+                for (int i = 1; i < nImu; i++) {
+                    float v = ysi[i];
+                    if (v < imuMin) imuMin = v;
+                    if (v > imuMax) imuMax = v;
+                }
+                if (imuMax <= imuMin) imuMax = imuMin + 1f;
+                float pad = 0.1f * (imuMax - imuMin);
+                imuMin -= pad; imuMax += pad;
             }
-            if (imuMax <= imuMin) imuMax = imuMin + 1f;
-            float pad = 0.1f * (imuMax - imuMin);
-            imuMin -= pad; imuMax += pad;
+        } else {
+            // Fixed scaling: use constant range for comparing swing magnitudes
+            imuMin = IMU_FIXED_MIN;
+            imuMax = IMU_FIXED_MAX;
         }
         imuPlot.setViewport(tMin, tMax, imuMin, imuMax);
         imuPlot.setSeries0(xsi, ysi, nImu);

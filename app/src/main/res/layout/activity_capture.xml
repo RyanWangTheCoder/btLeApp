@@ -38,12 +38,6 @@
 </LinearLayout>
 
     <TextView
-        android:id="@+id/txtPackets"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:text="Packets: 0" />
-    <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="Session Recorder"
@@ -67,16 +61,17 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:layout_marginStart="8dp"
-            android:text="Stop &amp; Save" />
-    </LinearLayout>
+            android:layout_marginStart="4dp"
+            android:text="Stop" />
 
-    <Button
-        android:id="@+id/btnProcessSession"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
-        android:text="Process this session" />
+        <Button
+            android:id="@+id/btnProcessSession"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="4dp"
+            android:text="Process" />
+    </LinearLayout>
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -94,15 +89,22 @@
             android:id="@+id/btnWindow"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
-            android:text="Window: 10s" />
+            android:layout_marginStart="4dp"
+            android:text="Win:10s" />
 
         <Button
             android:id="@+id/btnRawHz"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
-            android:text="RAW: 500Hz" />
+            android:layout_marginStart="4dp"
+            android:text="RAW:500" />
+
+        <Button
+            android:id="@+id/btnImuScale"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:text="IMU:Auto" />
     </LinearLayout>
 
     <TextView
@@ -141,13 +143,13 @@
     <com.clj.blesample.views.SimplePlotView
         android:id="@+id/emgPlot"
         android:layout_width="match_parent"
-        android:layout_height="220dp"
+        android:layout_height="210dp"
         android:layout_marginTop="8dp" />
 
     <com.clj.blesample.views.SimplePlotView
         android:id="@+id/imuPlot"
         android:layout_width="match_parent"
-        android:layout_height="160dp"
+        android:layout_height="210dp"
         android:layout_marginTop="8dp" />
 
     <TextView
