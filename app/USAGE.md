@@ -256,6 +256,135 @@ Android Studio should automatically detect the submodule. However, if you see Py
 
 ---
 
+## Building and Installing the Android App
+
+### 1. Build the APK
+
+To build the debug APK using Gradle:
+
+```bash
+cd C:\wangx\ftc\btLeApp
+.\gradlew assembleDebug
+```
+
+**What this does:**
+- Compiles Java/Kotlin code
+- Packages Python files (including submodule)
+- Creates debug APK at: `app/build/outputs/apk/debug/app-debug.apk`
+
+**Build time:** ~30-60 seconds (first build may take longer)
+
+### 2. Install on Android Device
+
+#### Prerequisites
+- Enable USB debugging on your Android device
+- Connect device via USB
+- Verify connection: `adb devices`
+
+#### Installation Commands
+
+**Option A: Fresh Install (Recommended)**
+
+If you get a signature mismatch error, uninstall the old version first:
+
+```bash
+# Uninstall old version
+adb uninstall com.clj.blesample
+
+# Install new APK
+adb install C:\wangx\ftc\btLeApp\app\build\outputs\apk\debug\app-debug.apk
+```
+
+**Option B: Update Install**
+
+If no signature issues (same signing key):
+
+```bash
+adb install -r C:\wangx\ftc\btLeApp\app\build\outputs\apk\debug\app-debug.apk
+```
+
+The `-r` flag replaces the existing app without uninstalling.
+
+### 3. Troubleshooting Installation
+
+#### Error: `INSTALL_FAILED_UPDATE_INCOMPATIBLE`
+
+**Full error:**
+```
+adb.exe: failed to install app-debug.apk: Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE: 
+Package com.clj.blesample signatures do not match previously installed version; ignoring!]
+```
+
+**Cause:** The APK is signed with a different key than the installed version.
+
+**Fix:** Uninstall first, then install:
+```bash
+adb uninstall com.clj.blesample
+adb install C:\wangx\ftc\btLeApp\app\build\outputs\apk\debug\app-debug.apk
+```
+
+**Note:** Uninstalling will delete all app data (captured sessions, settings, etc.). Back up important data first if needed.
+
+#### Error: `protocol fault (couldn't read status): connection reset`
+
+**Cause:** ADB server is in a bad state.
+
+**Fix:** Restart ADB server:
+```bash
+adb kill-server
+adb start-server
+adb devices
+```
+
+#### Error: `no devices/emulators found`
+
+**Cause:** Device not connected or USB debugging not enabled.
+
+**Fix:**
+1. Check USB cable connection
+2. Enable USB debugging on device (Settings → Developer Options)
+3. Accept "Allow USB debugging" prompt on device
+4. Run `adb devices` to verify
+
+### 4. Complete Build & Install Workflow
+
+```bash
+# 1. Navigate to project directory
+cd C:\wangx\ftc\btLeApp
+
+# 2. Ensure submodule is initialized
+git submodule update --init --recursive
+
+# 3. Build the APK
+.\gradlew assembleDebug
+
+# 4. Verify device connection
+adb devices
+
+# 5. Uninstall old version (if needed)
+adb uninstall com.clj.blesample
+
+# 6. Install new APK
+adb install app\build\outputs\apk\debug\app-debug.apk
+```
+
+### 5. Verify Installation
+
+After installation, verify the app is working:
+
+```bash
+# Check if app is installed
+adb shell pm list packages | findstr blesample
+
+# Launch the app
+adb shell am start -n com.clj.blesample/.MainActivity
+
+# Monitor logs
+adb logcat -s SessionCapture:* ProcessingActivity:*
+```
+
+---
+
 ## Related Documentation
 
 - **Python Analysis Code:** See `app/src/main/python/emg_util/HIGH_LEVEL_DESIGN.md`
