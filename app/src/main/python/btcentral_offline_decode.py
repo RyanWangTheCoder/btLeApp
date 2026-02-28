@@ -234,7 +234,6 @@ def _read_len_prefixed_frames(frames_path: Path):
 
 def decode_frames_bin_to_rotated_csv(session_dir: str, rotate_min: float = 20.0, overwrite_decoded: bool = True) -> Dict:
     session_dir = Path(session_dir)
-    frames_path = session_dir / "frames.bin"
     meta_path = session_dir / "meta.json"
     decoded_dir = session_dir / "decoded"
 
@@ -243,10 +242,24 @@ def decode_frames_bin_to_rotated_csv(session_dir: str, rotate_min: float = 20.0,
             shutil.rmtree(decoded_dir)
         decoded_dir.mkdir(parents=True, exist_ok=True)
 
-    if not frames_path.exists():
-        raise FileNotFoundError(str(frames_path))
+    # Find all frames_*.bin files (supports multi-file sessions)
+    frames_bins = sorted(session_dir.glob("frames_*.bin"))
+    if not frames_bins:
+        # Fallback to legacy frames.bin for backward compatibility
+        legacy_path = session_dir / "frames.bin"
+        if legacy_path.exists():
+            frames_bins = [legacy_path]
+        else:
+            raise FileNotFoundError(f"No frames_*.bin or frames.bin found in {session_dir}")
 
-    session_id = session_dir.name
+    # Extract session_id from directory name
+    # e.g., "session_20260228_044616" → "20260228_044616"
+    dir_name = session_dir.name
+    if dir_name.startswith("session_"):
+        session_id = dir_name[8:]  # Remove "session_" prefix
+    else:
+        session_id = dir_name
+    
     rotate_us = int(float(rotate_min) * 60.0 * 1_000_000.0)
 
     # Writers (created on-demand per segment)
@@ -338,65 +351,68 @@ def decode_frames_bin_to_rotated_csv(session_dir: str, rotate_min: float = 20.0,
         stats["outputs"].append(str(w.meta_path()))
         return w
 
-    # Process frames
-    for raw in _read_len_prefixed_frames(frames_path):
-        stats["frames_total"] += 1
-        for ver, flags, frame_seq, t_us_u32, tlvs in parser.feed(raw):
-            if tlvs and tlvs[0][0] == 0xFF:
-                stats["crc_errors"] += 1
-                continue
+    # Process all frames_*.bin files in chronological order
+    stats["frames_files_processed"] = []
+    for frames_path in frames_bins:
+        stats["frames_files_processed"].append(str(frames_path.name))
+        for raw in _read_len_prefixed_frames(frames_path):
+            stats["frames_total"] += 1
+            for ver, flags, frame_seq, t_us_u32, tlvs in parser.feed(raw):
+                if tlvs and tlvs[0][0] == 0xFF:
+                    stats["crc_errors"] += 1
+                    continue
 
-            stats["frames_ok"] += 1
-            dev_frame_us = clock.extend(t_us_u32)
-            if t0_dev_us is None:
-                t0_dev_us = dev_frame_us
-                stats["t0_dev_us"] = int(t0_dev_us)
+                stats["frames_ok"] += 1
+                dev_frame_us = clock.extend(t_us_u32)
+                if t0_dev_us is None:
+                    t0_dev_us = dev_frame_us
+                    stats["t0_dev_us"] = int(t0_dev_us)
 
-            for t, v in tlvs:
-                if t == TLV_EMG_BATCH:
-                    seq0, t0_off, sr_hz, ch, samples = decode_emg(v)
-                    # sample timestamps
-                    t0_us = dev_frame_us + int(t0_off)
-                    step_us = int(round(1_000_000 / float(sr_hz))) if sr_hz else 0
-                    for i in range(samples.shape[0]):
-                        dev_us = t0_us + i * step_us
-                        seg_idx = int((dev_us - t0_dev_us) // rotate_us) if rotate_us > 0 else 0
-                        env = int(samples[i, 0])
-                        rawv = int(samples[i, 1]) if ch > 1 else 0
-                        ref = int(samples[i, 2]) if ch > 2 else 0
-                        get_emg_writer(seg_idx, sr_hz, ch).writerow([
-                            int(dev_us), int(seq0 + i), env, rawv, ref, int(frame_seq), 0
-                        ])
-                    stats["emg_samples"] += int(samples.shape[0])
+                for t, v in tlvs:
+                    if t == TLV_EMG_BATCH:
+                        seq0, t0_off, sr_hz, ch, samples = decode_emg(v)
+                        # sample timestamps
+                        t0_us = dev_frame_us + int(t0_off)
+                        step_us = int(round(1_000_000 / float(sr_hz))) if sr_hz else 0
+                        for i in range(samples.shape[0]):
+                            dev_us = t0_us + i * step_us
+                            seg_idx = int((dev_us - t0_dev_us) // rotate_us) if rotate_us > 0 else 0
+                            env = int(samples[i, 0])
+                            rawv = int(samples[i, 1]) if ch > 1 else 0
+                            ref = int(samples[i, 2]) if ch > 2 else 0
+                            get_emg_writer(seg_idx, sr_hz, ch).writerow([
+                                int(dev_us), int(seq0 + i), env, rawv, ref, int(frame_seq), 0
+                            ])
+                        stats["emg_samples"] += int(samples.shape[0])
 
-                elif t == TLV_IMU_BATCH:
-                    seq0, t0_off, sr_hz, count, acc_fsr_g, gyro_fsr_dps, samples = decode_imu(v, int(ver), int(flags))
-                    t0_us = dev_frame_us + int(t0_off)
-                    step_us = int(round(1_000_000 / float(sr_hz))) if sr_hz else 0
-                    for i in range(samples.shape[0]):
-                        dev_us = t0_us + i * step_us
-                        seg_idx = int((dev_us - t0_dev_us) // rotate_us) if rotate_us > 0 else 0
-                        ax, ay, az, gx, gy, gz = [int(x) for x in samples[i, :].tolist()]
-                        get_imu_writer(seg_idx, sr_hz, acc_fsr_g, gyro_fsr_dps).writerow([
-                            int(dev_us), int(seq0 + i), ax, ay, az, gx, gy, gz,
-                            acc_fsr_g if acc_fsr_g is not None else "",
-                            gyro_fsr_dps if gyro_fsr_dps is not None else "",
+                    elif t == TLV_IMU_BATCH:
+                        seq0, t0_off, sr_hz, count, acc_fsr_g, gyro_fsr_dps, samples = decode_imu(v, int(ver), int(flags))
+                        t0_us = dev_frame_us + int(t0_off)
+                        step_us = int(round(1_000_000 / float(sr_hz))) if sr_hz else 0
+                        for i in range(samples.shape[0]):
+                            dev_us = t0_us + i * step_us
+                            seg_idx = int((dev_us - t0_dev_us) // rotate_us) if rotate_us > 0 else 0
+                            ax, ay, az, gx, gy, gz = [int(x) for x in samples[i, :].tolist()]
+                            get_imu_writer(seg_idx, sr_hz, acc_fsr_g, gyro_fsr_dps).writerow([
+                                int(dev_us), int(seq0 + i), ax, ay, az, gx, gy, gz,
+                                acc_fsr_g if acc_fsr_g is not None else "",
+                                gyro_fsr_dps if gyro_fsr_dps is not None else "",
+                                int(frame_seq), 0
+                            ])
+                        stats["imu_samples"] += int(samples.shape[0])
+
+                    elif t == TLV_VITALS:
+                        vit = decode_vitals(v)
+                        age_ms = int(vit["age_ms"]) if vit.get("age_ms") is not None else 65535
+                        dev_us_computed = int(dev_frame_us - age_ms * 1000)
+                        vitals_w.writerow([
+                            int(dev_frame_us), dev_us_computed,
+                            "" if vit["spo2"] is None else int(vit["spo2"]),
+                            "" if vit["hr"] is None else float(vit["hr"]),
+                            int(age_ms), int(vit["flags"]), int(vit["brightness"]),
                             int(frame_seq), 0
                         ])
-                    stats["imu_samples"] += int(samples.shape[0])
-
-                elif t == TLV_VITALS:
-                    vit = decode_vitals(v)
-                    age_ms = int(vit["age_ms"]) if vit.get("age_ms") is not None else 65535
-                    dev_us_computed = int(dev_frame_us - age_ms * 1000)
-                    vitals_w.writerow([
-                        int(dev_frame_us), dev_us_computed,
-                        "" if vit["spo2"] is None else int(vit["spo2"]),
-                        "" if vit["hr"] is None else float(vit["hr"]),
-                        int(age_ms), int(vit["flags"]), int(vit["brightness"]),
-                        int(frame_seq), 0
-                    ])
-                    stats["vitals_records"] += 1
+                        stats["vitals_records"] += 1
 
     # Close writers
     for w in emg_writers.values():

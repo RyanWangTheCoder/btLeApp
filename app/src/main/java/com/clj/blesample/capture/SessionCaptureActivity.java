@@ -539,20 +539,89 @@ public class SessionCaptureActivity extends AppCompatActivity {
 
     private void createSessionFiles() throws IOException {
         String ts = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
-        String sessionId = "session_" + ts;
         File root = getExternalFilesDir(null);
         if (root == null) root = getFilesDir();
-        sessionDir = new File(root, sessionId);
+        
+        // Find most recent frames_*.bin file across all session directories
+        File mostRecentFile = findMostRecentFramesFile(root);
+        
+        if (mostRecentFile != null) {
+            // Parse timestamp from filename: frames_20260228_051234.bin
+            long lastTimestamp = parseTimestampFromFilename(mostRecentFile.getName());
+            long currentTimestamp = parseTimestamp(ts);
+            long gapMinutes = (currentTimestamp - lastTimestamp) / 60000;
+            
+            if (gapMinutes < 30) {
+                // Continue existing session (gap < 30 min)
+                sessionDir = mostRecentFile.getParentFile();
+                runOnUiThread(() -> txtStatus.setText("Continuing session (gap: " + gapMinutes + " min)..."));
+            } else {
+                // Start new session (gap >= 30 min)
+                sessionDir = new File(root, "session_" + ts);
+                runOnUiThread(() -> txtStatus.setText("Starting new session (gap: " + gapMinutes + " min)..."));
+            }
+        } else {
+            // First capture ever - create new session
+            sessionDir = new File(root, "session_" + ts);
+            runOnUiThread(() -> txtStatus.setText("Starting new session (first capture)..."));
+        }
+        
         if (!sessionDir.exists() && !sessionDir.mkdirs()) {
             throw new IOException("mkdir failed: " + sessionDir);
         }
-        framesFile = new File(sessionDir, "frames.bin");
+        
+        // Timestamped filename (like Windows!)
+        framesFile = new File(sessionDir, "frames_" + ts + ".bin");
         bytesWritten = 0;
         framesWritten = 0;
         t0SessionUs = -1;
         wrapCount = 0;
         lastTFrameU32 = -1;
         lastMarkerUs = 0;
+    }
+    
+    private File findMostRecentFramesFile(File root) {
+        File[] sessionDirs = root.listFiles(f -> f.isDirectory() && f.getName().startsWith("session_"));
+        if (sessionDirs == null || sessionDirs.length == 0) return null;
+        
+        File mostRecent = null;
+        long mostRecentTime = 0;
+        
+        for (File dir : sessionDirs) {
+            File[] framesFiles = dir.listFiles(f -> f.isFile() && f.getName().startsWith("frames_") && f.getName().endsWith(".bin"));
+            if (framesFiles == null) continue;
+            
+            for (File f : framesFiles) {
+                long timestamp = parseTimestampFromFilename(f.getName());
+                if (timestamp > mostRecentTime) {
+                    mostRecentTime = timestamp;
+                    mostRecent = f;
+                }
+            }
+        }
+        
+        return mostRecent;
+    }
+    
+    private long parseTimestampFromFilename(String filename) {
+        // Extract timestamp from "frames_20260228_051234.bin"
+        try {
+            String ts = filename.replace("frames_", "").replace(".bin", "");
+            return parseTimestamp(ts);
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+    
+    private long parseTimestamp(String ts) {
+        // Parse "20260228_051234" to milliseconds since epoch
+        try {
+            SimpleDateFormat sdf = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US);
+            Date date = sdf.parse(ts);
+            return date != null ? date.getTime() : 0;
+        } catch (Exception e) {
+            return 0;
+        }
     }
 
     private void openOutput() throws IOException {
@@ -579,11 +648,25 @@ public class SessionCaptureActivity extends AppCompatActivity {
         if (sessionDir == null) return;
         File meta = new File(sessionDir, "meta.json");
 
+        // List all frames_*.bin files in the session directory
+        File[] framesFiles = sessionDir.listFiles(f -> f.isFile() && 
+                f.getName().startsWith("frames_") && f.getName().endsWith(".bin"));
+        
+        StringBuilder framesListJson = new StringBuilder();
+        framesListJson.append("  \"frames_files\": [");
+        if (framesFiles != null && framesFiles.length > 0) {
+            for (int i = 0; i < framesFiles.length; i++) {
+                if (i > 0) framesListJson.append(", ");
+                framesListJson.append("\"").append(framesFiles[i].getName()).append("\"");
+            }
+        }
+        framesListJson.append("],\n");
+
         String json =
                 "{\n" +
                         "  \"device_name\": \"" + (bleDevice.getName() != null ? bleDevice.getName() : "") + "\",\n" +
                         "  \"mac\": \"" + bleDevice.getMac() + "\",\n" +
-                        "  \"frames_file\": \"frames.bin\",\n" +
+                        framesListJson.toString() +
                         "  \"frames_written\": " + framesWritten + ",\n" +
                         "  \"bytes_written\": " + bytesWritten + "\n" +
                         "}\n";

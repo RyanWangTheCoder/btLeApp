@@ -81,10 +81,10 @@ The system has **three distinct processing tiers**, each optimized for different
 |------|---------|-------------|----------------------|
 | **realtime_bridge.py** | Real-time fatigue monitoring during BLE capture | Java (SessionCaptureActivity) | sensordata_plotter.py --fatigue |
 | **offline_runner.py** | Post-capture decode + session stitching | Java (post-capture UI) | emg_util_yaml_runner.py |
-| **fatigue_monitor.py** | Core fatigue analysis class (MDF, RMS, baseline) | realtime_bridge.py, sensordata_plotter.py | (shared) |
-| **emg_util_nopandas.py** | Signal processing without pandas dependency | fatigue_monitor.py | emg_util.py (subset) |
+| **fatigue_monitor.py** | Core fatigue analysis class (MDF, RMS, baseline) | realtime_bridge.py, sensordata_plotter.py | (shared via submodule) |
+| **emg_util_nopandas.py** | Signal processing without pandas dependency | fatigue_monitor.py | emg_util.py (subset, shared via submodule) |
 | **btcentral_offline_decode.py** | Binary frame decoder | offline_runner.py | btCentral.py (decode logic) |
-| **analysis_bridge.py** | **DEPRECATED** compatibility shim | (legacy Java code) | N/A |
+| **analysis_bridge.py** | Compatibility wrapper for Java code | ProcessingActivity, SessionCaptureActivity | N/A (Android-specific) |
 
 ### Windows Python Files (`C:\wangx\ftc\arduino\py_scripts\`)
 
@@ -878,12 +878,13 @@ git commit -m "Update emg_util to latest"
 - ✅ `realtime_bridge.py` - Java ↔ Python bridge for real-time fatigue
 - ✅ `offline_runner.py` - Post-capture analysis on device
 - ✅ `btcentral_offline_decode.py` - Binary frame decoder
-- ❓ `analysis_bridge.py` - DEPRECATED (check if still used)
+- ✅ `analysis_bridge.py` - Compatibility wrapper for existing Java code
 
 **Rationale for Keeping Android-Specific Files:**
 1. **realtime_bridge.py** - Provides JSON API for Java (Chaquopy interface)
 2. **offline_runner.py** - Handles Android's flat file structure and session discovery
 3. **btcentral_offline_decode.py** - Optimized for Android's batch processing
+4. **analysis_bridge.py** - Maintains backward compatibility while using modular architecture
 
 These files are **intentionally Android-specific** and should NOT be consolidated.
 
