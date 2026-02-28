@@ -26,8 +26,8 @@ import json
 import numpy as np
 
 from fatigue_monitor import FatigueMonitor
+import emg_util_nopandas as emg               
 from emg_util_nopandas import compute_windowed_features, analyze_fatigue_from_windowed
-
 
 # ---------------------------------------------------------------------------
 # Module-level singleton — persists across Chaquopy calls within one session

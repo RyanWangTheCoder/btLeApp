@@ -1,0 +1,3 @@
+[submodule "app/src/main/python/emg_util"]
+	path = app/src/main/python/emg_util
+	url = ../emg_util

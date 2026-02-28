@@ -16,6 +16,18 @@ android {
         versionCode rootProject.ext.versionControl.versionCode
         versionName rootProject.ext.versionControl.versonName
     }
+
+    // ========== ADD THIS SECTION ==========
+    sourceSets {
+        main {
+            python {
+                srcDir "src/main/python"           // Android-specific files
+                srcDir "src/main/python/emg_util"  // Submodule (shared library)
+            }
+        }
+    }
+    // ======================================
+
     buildTypes {
         release {
             minifyEnabled false
@@ -39,7 +51,7 @@ dependencies {
 chaquopy {
     defaultConfig {
         version = '3.10'
-		buildPython "C:/Python310/python.exe"
+        buildPython "C:/Python310/python.exe"
         pip {
             install 'numpy'
             install 'scipy'
