@@ -725,9 +725,34 @@ public class SessionCaptureActivity extends AppCompatActivity {
     private void decodeVitals(byte[] buf, int valOff, int valLen) {
         if (valLen < 11) return; // Vitals payload is 11 bytes
         // spo2(2) hr(2) age(2) flags(1) bright(1) batt_pct(1) batt_mv(2)
-        final int batt_pct = buf[valOff + 8] & 0xFF; // 9th byte in payload
+        
+        final int spo2_u16 = u16le(buf, valOff);      // Offset 0-1
+        final int hr_x10_u16 = u16le(buf, valOff + 2); // Offset 2-3
+        final int age_ms = u16le(buf, valOff + 4);     // Offset 4-5
+        final int flags = buf[valOff + 6] & 0xFF;      // Offset 6
+        final int batt_pct = buf[valOff + 8] & 0xFF;   // Offset 8
+        final int batt_mv = u16le(buf, valOff + 9);    // Offset 9-10
+        
+        final boolean spo2Valid = (flags & 0x01) != 0;
+        final boolean hrValid = (flags & 0x02) != 0;
 
         runOnUiThread(() -> {
+            // Update SpO2 display
+            if (spo2Valid && spo2_u16 <= 100) {
+                txtSpo2.setText("SpO2: " + spo2_u16 + "%");
+            } else {
+                txtSpo2.setText("SpO2: N/A");
+            }
+            
+            // Update Heart Rate display
+            if (hrValid && hr_x10_u16 < 0xFFFF) {
+                float hr_bpm = hr_x10_u16 / 10.0f;
+                txtHeartRate.setText(String.format(Locale.US, "HR: %.1f bpm", hr_bpm));
+            } else {
+                txtHeartRate.setText("HR: N/A");
+            }
+            
+            // Update Battery display
             if (batt_pct <= 100) {
                 txtBattery.setText("Battery: " + batt_pct + "%");
             } else {
