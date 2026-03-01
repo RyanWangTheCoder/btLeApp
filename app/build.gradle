@@ -35,6 +35,21 @@ android {
         }
     }
     namespace 'com.clj.blesample'
+
+    buildFeatures {
+        buildConfig = true
+    }
+
+    aaptOptions {
+        noCompress "so"
+    }
+
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging = false
+        }
+    }
+
 }
 
 dependencies {
