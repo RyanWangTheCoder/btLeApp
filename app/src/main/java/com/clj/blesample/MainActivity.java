@@ -146,7 +146,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         BleManager.getInstance().init(getApplication());
         BleManager.getInstance()
                 .enableLog(true)
-                .setReConnectCount(1, 5000)
+                .setReConnectCount(0, 5000)  // disabled: SessionCaptureActivity handles reconnect
                 .setConnectOverTime(20000)
                 .setOperateTimeout(5000);
 /*

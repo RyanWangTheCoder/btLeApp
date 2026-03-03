@@ -23,6 +23,9 @@ public class SimplePlotView extends View {
     private float tMin = 0f, tMax = 10f;
     private float yMin = 0f, yMax = 1f;
     private String title = "";
+    // Multi-color title segments (optional — overrides single title when set)
+    private String[] titleSegments;
+    private int[] titleSegColors;
 
     public SimplePlotView(Context c) { super(c); init(); }
     public SimplePlotView(Context c, @Nullable AttributeSet a) { super(c, a); init(); }
@@ -45,7 +48,15 @@ public class SimplePlotView extends View {
         textPaint.setAntiAlias(true);
     }
 
-    public void setTitle(String t) { this.title = t; }
+    public void setTitle(String t) { this.title = t; this.titleSegments = null; }
+
+    /** Set a multi-segment title where each segment has its own color.
+     *  texts[i] is drawn in colors[i]. Separator strings (e.g. " / ") use Color.WHITE. */
+    public void setTitleSegments(String[] texts, int[] colors) {
+        this.titleSegments = texts;
+        this.titleSegColors = colors;
+        this.title = null;
+    }
     public void setViewport(float tMin, float tMax, float yMin, float yMax) {
         this.tMin = tMin; this.tMax = tMax; this.yMin = yMin; this.yMax = yMax;
     }
@@ -83,7 +94,16 @@ public class SimplePlotView extends View {
         drawSeries(canvas, x1, y1, n1, linePaints[1], w, h);
         drawSeries(canvas, x2, y2, n2, linePaints[2], w, h);
 
-        if (title != null && !title.isEmpty()) {
+        if (titleSegments != null && titleSegColors != null) {
+            float x = 12f;
+            for (int i = 0; i < titleSegments.length; i++) {
+                int col = (i < titleSegColors.length) ? titleSegColors[i] : Color.WHITE;
+                textPaint.setColor(col);
+                canvas.drawText(titleSegments[i], x, 34, textPaint);
+                x += textPaint.measureText(titleSegments[i]);
+            }
+            textPaint.setColor(Color.WHITE); // reset for next frame
+        } else if (title != null && !title.isEmpty()) {
             canvas.drawText(title, 12, 34, textPaint);
         }
     }

@@ -5,6 +5,163 @@ Format: newest entry at the top.
 
 ---
 
+## [2026-03-03] — IMU fixed-scale bug fix (`IMU_FIXED_MAX`)
+
+### Fixed
+- **`IMU_FIXED_MAX` wrong units** — was set to `600f` with comment "Gyro range: 0-600 dps",
+  but the IMU plot shows **accelerometer magnitude in raw ADC counts**, not gyroscope dps.
+  - ICM-20948 ±4g FSR: 8192 LSB/g → at rest `amag ≈ 8192`, swing peak `≈ 16000–32768`
+  - `600` is far below the actual signal → curve was completely invisible in `IMU:Fix` mode
+  - **Before:** `IMU_FIXED_MAX = 600f` (gyro dps — wrong units)
+  - **After:** `IMU_FIXED_MAX = 40000f` (accel magnitude counts — correct, ~10% headroom above 4g)
+
+### IMU:Fix mode behavior after fix
+| Condition | `amag` value | % of plot height |
+|---|---|---|
+| At rest (1g) | ~8192 | ~20% |
+| Moderate movement (2g) | ~16384 | ~41% |
+| Hard swing (4g) | ~32768 | ~82% |
+| Full-scale headroom | 40000 | 100% |
+
+Fixed scale is useful for **comparing swing intensities across time** — consistent Y-axis
+means a taller peak = harder swing, directly comparable between swings.
+
+---
+
+## [2026-03-03] — EMG plot auto-zoom + colored legend title
+
+### Added
+- **RAW auto-zoom** — RAW (cyan) is normalized each frame to fill the full 0–4095 plot height:
+  - Computes peak deviation from ADC midpoint (2048) in the current window
+  - Minimum range = 100 counts (prevents over-zoom on baseline noise)
+  - `zoom_factor = 2048 / peak_deviation` — shown live in the title
+  - At rest (±30 cts): zoom×20.5; Active (±300 cts): zoom×6.8; Strong (±800 cts): zoom×2.6
+
+- **LPF dynamic scaling (Option C)** — LPF (magenta) is scaled each frame to match ENV's
+  current window vertical range, so both envelope curves are directly comparable:
+  - `lpf_zoom = env_range / lpf_range` — shown live in the title
+  - LPF and ENV track each other visually; divergence reveals HW vs SW envelope differences
+
+- **Colored legend title** — each signal label in the plot title uses the curve's color:
+  - `RAW(zoom×6.8)` in **cyan** / `ENV(0-4095)` in **yellow** / `LPF(×4.2)` in **magenta**
+  - Implemented via new `SimplePlotView.setTitleSegments(String[], int[])` API
+
+### Fixed
+- **LPF computation bug** — was computing `abs(raw)` where `raw` is always 0–4095 (unsigned),
+  so `abs(raw) = raw` and the LPF converged to ~2048 (DC level) — a flat invisible line.
+  - **Before:** `float x = Math.abs((float)raw);` → LPF ≈ 2048 (useless)
+  - **After:** `float x = Math.abs((float)raw - 2048f);` → LPF = 0 at rest, ~100–500 active
+
+### Changed
+- **`SimplePlotView.java`:**
+  - Added `setTitleSegments(String[] texts, int[] colors)` — draws multi-color title
+  - `setTitle()` clears segments (backward compatible)
+  - `onDraw()` measures each segment's text width and draws sequentially with per-segment color
+
+- **`SessionCaptureActivity.java`:**
+  - `decodeEmgBatch()` — fixed LPF formula; stores raw 0–2047 (no `×2` hack)
+  - `renderPlots()` — added RAW normalization block + LPF Option C scaling block
+  - `renderPlots()` — replaced `emgPlot.setTitle()` with `emgPlot.setTitleSegments()`
+
+### Signal summary (all 3 curves now clearly visible)
+| Color | Signal | Scale | What you see |
+|---|---|---|---|
+| Cyan | RAW | Normalized to fill 0–4095 | Oscillations always fill plot; zoom factor in title |
+| Yellow | ENV | Actual 0–4095 (unchanged) | Absolute muscle intensity — rises with contraction |
+| Magenta | LPF | Scaled to match ENV range | Smooth envelope tracking ENV — compare shapes |
+
+---
+
+## [2026-03-03] — Auto-reconnect to ESP32 in `SessionCaptureActivity`
+
+### Added
+- **Auto-reconnect** — `SessionCaptureActivity` now automatically reconnects to the ESP32 on
+  disconnect or data stall, mirroring the behavior of `btCentral.py` on the PC side.
+
+#### Mechanism (mirrors `btCentral.py` exactly):
+
+| `btCentral.py` | `SessionCaptureActivity.java` |
+|---|---|
+| `handle_disconnect` callback | Watchdog detects `isConnected() == false` |
+| `watchdog_task` (polls every 0.5s, stall=5s) | `startWatchdog()` — Handler fires every 500ms, stall threshold 5000ms |
+| `ping_task` (writes `b"PING"` every 5s) | `pingTimer` already existed (1s interval) |
+| Exponential backoff 0.5s→1s→…→20s | `reconnectBackoffMs` doubles each attempt, cap 20s |
+| `st.parser = FrameParser()` | `qLog.clear()`, `qPlot.clear()` |
+| `st.clock = DeviceClockExtender()` | `wrapCount=0`, `lastTFrameU32=-1` |
+| `st.last_frame_seq = None` | `t0SessionUs=-1` |
+| New CSV segment (same session) | New `frames_*.bin` in same `sessionDir` |
+
+#### New fields in `SessionCaptureActivity`:
+```java
+private volatile long lastNotifyMs = 0;       // watchdog heartbeat
+private volatile int reconnectCount = 0;       // total reconnect attempts (for UI)
+private volatile int reconnectBackoffMs = 500; // current backoff delay
+private static final int MAX_RECONNECT_BACKOFF_MS = 20_000;
+private static final int STALL_RECONNECT_MS   = 5_000;
+private static final int WATCHDOG_INTERVAL_MS = 500;
+private Runnable watchdogRunnable;
+private Runnable reconnectRunnable;
+```
+
+#### New methods in `SessionCaptureActivity`:
+- `startWatchdog()` — starts stall-detection loop on main Handler
+- `stopWatchdog()` — cancels watchdog
+- `cancelReconnect()` — cancels pending reconnect runnable
+- `triggerReconnect(reason)` — stops ping+watchdog, clears queues, resets clock state,
+  opens new `frames_*.bin` segment, starts backoff
+- `scheduleReconnect()` — posts `BleManager.connect()` after backoff delay; on success
+  resets backoff and calls `subscribeNotifyAndStartPing()`; on fail doubles backoff and retries
+
+#### Lifecycle integration:
+- Watchdog starts in `onNotifySuccess()` (after notify subscription confirmed)
+- Watchdog + reconnect cancelled in `stopSession()` and `onDestroy()`
+- `onCharacteristicChanged()` updates `lastNotifyMs` on every received packet
+
+### Changed
+- **`SessionCaptureActivity.java`:**
+  - Added `android.bluetooth.BluetoothGatt` and `BleGattCallback` imports
+  - `onNotifySuccess()` — calls `startWatchdog()` after `startPingTimer()`
+  - `onCharacteristicChanged()` — adds `lastNotifyMs = System.currentTimeMillis()`
+  - `stopSession()` — calls `stopWatchdog()`, `cancelReconnect()`, resets `reconnectBackoffMs`
+  - `onDestroy()` — calls `stopWatchdog()`, `cancelReconnect()` before `stopSession()`
+
+- **`MainActivity.java`:**
+  - `setReConnectCount(1, 5000)` → `setReConnectCount(0, 5000)` — disables FastBLE's
+    built-in single reconnect attempt to avoid conflicting with the new custom loop
+
+### File organization on reconnect
+Each reconnect opens a **new `frames_*.bin` segment in the same `sessionDir`** (same tennis
+session). `writeMetaJson()` already lists all `frames_*.bin` files, so no extra work needed:
+
+```
+session_20260302_143000/
+  frames_20260302_143000.bin   ← initial recording
+  frames_20260302_143512.bin   ← after reconnect #1
+  frames_20260302_144023.bin   ← after reconnect #2
+  meta.json                    ← lists all 3 files automatically
+```
+
+### Processing compatibility
+**No changes needed to the Python processing pipeline.** `analysis_bridge.py` already:
+- `process_session_compat()` — globs all `frames_*.bin` and passes session dir to decoder
+- `analyze_session()` — calls `stitch_decoded_session()` which stitches all decoded CSVs
+
+Reconnect segments are decoded and analyzed as one continuous session automatically.
+
+### UI feedback during reconnect
+- `txtStatus` shows: `"Reconnecting... (attempt N, wait X.Xs)"`
+- `txtStatus` shows: `"Reconnecting... (attempt N)"` while connecting
+- `txtStatus` shows: `"Reconnected! MTU=247 (recon#N)"` on success
+
+### Scope
+- Reconnect is **activity-scoped**: only active while `SessionCaptureActivity` is alive
+  and `recording == true`
+- Pressing Stop cancels all reconnect activity and resets backoff
+- Navigating to `ProcessingActivity` requires stopping first (by design — `btnProcessSession`
+  is only enabled after `stopSession()`)
+
+---
+
 ## [2026-02-27] — Multi-file session support (30-minute gap detection)
 
 ### Added

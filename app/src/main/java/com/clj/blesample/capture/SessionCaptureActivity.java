@@ -24,6 +24,8 @@ import com.clj.blesample.views.MarkerBufferF;
 import com.clj.blesample.views.RingBufferF;
 import com.clj.blesample.views.SimplePlotView;
 import com.clj.fastble.BleManager;
+import android.bluetooth.BluetoothGatt;
+import com.clj.fastble.callback.BleGattCallback;
 import com.clj.fastble.callback.BleNotifyCallback;
 import com.clj.fastble.callback.BleMtuChangedCallback;
 import com.clj.fastble.callback.BleWriteCallback;
@@ -145,13 +147,33 @@ public class SessionCaptureActivity extends AppCompatActivity {
     
     private volatile boolean imuScaleAuto = true;  // true=Auto, false=Fixed
     private static final float IMU_FIXED_MIN = 0f;
-    private static final float IMU_FIXED_MAX = 600f;  // Gyro range: 0-600 dps
+    // Accelerometer magnitude in raw ADC counts (ICM-20948 ±4g FSR: 8192 LSB/g).
+    // At rest: ~8192 (1g). Typical swing peak: 2–4g = 16000–32768.
+    // Fixed max = 40000 gives ~10% headroom above full-scale.
+    private static final float IMU_FIXED_MAX = 40000f;
     private static final float GYRO_SCALE_FACTOR = 16.4f;  // ICM-20948: ±2000dps range, 32768/2000 = 16.4 LSB/dps
 
     private float envLpf = 0f;
     private float envAlpha = alphaForCutoff(3.6f, ENV_PLOT_HZ);
+    // DC offset tracker: slow LPF (0.1 Hz) to estimate RAW's true midpoint.
+    // MyoWare DC bias shifts the center away from the theoretical 2048 (e.g., ~1830–1843).
+    // Initialized to 1843 (typical observed value) to minimize convergence time.
+    private float rawDcLpf = 1843f;
+    private final float rawDcAlpha = alphaForCutoff(0.1f, ENV_PLOT_HZ); // ~0.013 at 50 Hz
 
     private final Handler ui = new Handler(Looper.getMainLooper());
+
+    // ── Auto-reconnect state ────────────────────────────────────────────────
+    private volatile long lastNotifyMs = 0;
+    private volatile int reconnectCount = 0;
+    private volatile int reconnectBackoffMs = 500;
+    private static final int MAX_RECONNECT_BACKOFF_MS = 20_000;
+    private static final int STALL_RECONNECT_MS = 5_000;
+    private static final int WATCHDOG_INTERVAL_MS = 500;
+    private Runnable watchdogRunnable;
+    private Runnable reconnectRunnable;
+    // ───────────────────────────────────────────────────────────────────────
+
     private final Runnable uiTick = new Runnable() {
         @Override public void run() {
             renderPlots();
@@ -181,7 +203,7 @@ public class SessionCaptureActivity extends AppCompatActivity {
         imuPlot = findViewById(R.id.imuPlot);
         txtFatigue = findViewById(R.id.txtFatigue);
 
-        emgPlot.setTitle("EMG (RAW / ENV / LPF(abs(RAW)))");
+        emgPlot.setTitle("EMG: RAW(zoom) / ENV(0-4095) / LPF(abs(RAW))");
         imuPlot.setTitle("IMU acc magnitude + markers");
 
         if (Build.VERSION.SDK_INT >= 33) {
@@ -321,6 +343,7 @@ public class SessionCaptureActivity extends AppCompatActivity {
                         runOnUiThread(() -> {
                             txtStatus.setText("Recording... (notify OK)");
                             startPingTimer();
+                            startWatchdog(); // start stall watchdog
                         });
                     }
                     @Override public void onNotifyFailure(BleException exception) {
@@ -331,6 +354,7 @@ public class SessionCaptureActivity extends AppCompatActivity {
                     }
                     @Override public void onCharacteristicChanged(byte[] data) {
                         if (!recording) return;
+                        lastNotifyMs = System.currentTimeMillis(); // watchdog heartbeat
                         byte[] a = data.clone();
                         byte[] b = data.clone();
                         qLog.offer(a);
@@ -351,6 +375,9 @@ public class SessionCaptureActivity extends AppCompatActivity {
         btnStart.setEnabled(true);
 
         stopPingTimer();
+        stopWatchdog();
+        cancelReconnect();
+        reconnectBackoffMs = 500;
         try { BleManager.getInstance().stopNotify(bleDevice, NUS_SERVICE_UUID, NUS_TX_CHAR_UUID); } catch (Exception ignored) {}
         stopWorkerThreads();
 
@@ -794,9 +821,14 @@ public class SessionCaptureActivity extends AppCompatActivity {
             if ((seq % rawDecim) == 0) emgRawBuf.add(tSec, (float)raw);
             if ((seq % envDecim) == 0) {
                 emgEnvBuf.add(tSec, (float)env);
-                float x = Math.abs((float)raw);
+                // DC offset tracking: slow LPF (0.1 Hz) estimates the true RAW midpoint.
+                // MyoWare DC bias shifts center from theoretical 2048 to ~1830–1843.
+                // Using the actual center makes the envelope symmetric and correct.
+                rawDcLpf = rawDcLpf + rawDcAlpha * ((float)raw - rawDcLpf);
+                // Envelope: deviation from the tracked DC center (0 at rest, ~40+ during contraction)
+                float x = Math.abs((float)raw - rawDcLpf);
                 envLpf = envLpf + envAlpha * (x - envLpf);
-                emgFiltBuf.add(tSec, envLpf);
+                emgFiltBuf.add(tSec, envLpf); // store raw envelope; renderPlots() scales dynamically
             }
         }
     }
@@ -889,6 +921,66 @@ public class SessionCaptureActivity extends AppCompatActivity {
         int nImu = imuBuf.snapshot(tMin, tMax, xsi, ysi);
         int nMk = markers.snapshot(tMin, tMax, tmk);
 
+        // ── RAW: normalize to fill 0–4095 (Option F) ─────────────────────
+        // Use the tracked DC center (rawDcLpf) instead of hardcoded 2048.
+        // This correctly handles MyoWare's DC bias (~1830–1843 instead of 2048).
+        // Map: rawDcLpf → 2048 (plot center), peak deviation fills ±2048.
+        final float PLOT_CENTER = 2048f;
+        final float rawCenter = rawDcLpf; // tracked DC midpoint (converges in ~10s)
+        final float RAW_MIN_RANGE = 100f; // min peak deviation — prevents over-zoom on baseline noise
+        float rawPeakDev = RAW_MIN_RANGE;
+        for (int i = 0; i < nRaw; i++) {
+            float dev = Math.abs(ys0[i] - rawCenter);
+            if (dev > rawPeakDev) rawPeakDev = dev;
+        }
+        float rawZoom = PLOT_CENTER / rawPeakDev; // e.g., 2048/40 = 51.2× at rest
+        for (int i = 0; i < nRaw; i++) {
+            ys0[i] = PLOT_CENTER + (ys0[i] - rawCenter) * rawZoom;
+        }
+
+        // ── LPF: scale to match ENV's current window range (Option C) ─────
+        // ENV (yellow) is kept at its actual 0–4095 value (absolute scale preserved).
+        // LPF (magenta) = LPF(|RAW-2048|), range 0–2047. Scale it so its variation
+        // spans the same vertical range as ENV in the current window → easy comparison.
+        float envLo = 4095f, envHi = 0f;
+        for (int i = 0; i < nEnv; i++) {
+            if (ys1[i] < envLo) envLo = ys1[i];
+            if (ys1[i] > envHi) envHi = ys1[i];
+        }
+        if (envHi - envLo < 50f) { envLo = 0f; envHi = 200f; } // fallback when no data yet
+        float envRange = envHi - envLo;
+
+        float lpfLo = Float.MAX_VALUE, lpfHi = -Float.MAX_VALUE;
+        for (int i = 0; i < nFlt; i++) {
+            if (ys2[i] < lpfLo) lpfLo = ys2[i];
+            if (ys2[i] > lpfHi) lpfHi = ys2[i];
+        }
+        float lpfRange = (lpfHi > lpfLo) ? (lpfHi - lpfLo) : 1f;
+        if (lpfRange < 10f) lpfRange = 10f; // prevent over-zoom on flat baseline
+        float lpfZoom = envRange / lpfRange;
+        for (int i = 0; i < nFlt; i++) {
+            ys2[i] = envLo + (ys2[i] - lpfLo) * lpfZoom;
+        }
+
+        // ── Colored title: each label in the color of its curve ───────────
+        emgPlot.setTitleSegments(
+            new String[]{
+                String.format(Locale.US, "RAW(zoom\u00d7%.1f)", rawZoom),
+                " / ",
+                "ENV(0-4095)",
+                " / ",
+                String.format(Locale.US, "LPF(\u00d7%.1f)", lpfZoom)
+            },
+            new int[]{
+                android.graphics.Color.CYAN,
+                android.graphics.Color.WHITE,
+                android.graphics.Color.YELLOW,
+                android.graphics.Color.WHITE,
+                android.graphics.Color.MAGENTA
+            }
+        );
+        // ─────────────────────────────────────────────────────────────────
+
         emgPlot.setViewport(tMin, tMax, 0f, 4095f);
         emgPlot.setSeries0(xs0, ys0, nRaw);
         emgPlot.setSeries1(xs1, ys1, nEnv);
@@ -964,8 +1056,149 @@ public class SessionCaptureActivity extends AppCompatActivity {
         super.onDestroy();
         ui.removeCallbacks(uiTick);
         stopFatigueThread();
+        stopWatchdog();
+        cancelReconnect();
         stopSession();
     }
+
+    // ── Auto-reconnect ──────────────────────────────────────────────────────
+
+    /** Start the stall-detection watchdog. Fires every WATCHDOG_INTERVAL_MS on the main thread. */
+    private void startWatchdog() {
+        stopWatchdog();
+        lastNotifyMs = System.currentTimeMillis();
+        watchdogRunnable = new Runnable() {
+            @Override public void run() {
+                if (!recording) return;
+                long age = System.currentTimeMillis() - lastNotifyMs;
+                boolean connected = BleManager.getInstance().isConnected(bleDevice);
+                if (!connected || age > STALL_RECONNECT_MS) {
+                    String reason = connected ? ("stall_" + age + "ms") : "disconnect";
+                    triggerReconnect(reason);
+                    return; // don't re-post; triggerReconnect takes over
+                }
+                ui.postDelayed(this, WATCHDOG_INTERVAL_MS);
+            }
+        };
+        ui.postDelayed(watchdogRunnable, WATCHDOG_INTERVAL_MS);
+    }
+
+    private void stopWatchdog() {
+        if (watchdogRunnable != null) {
+            ui.removeCallbacks(watchdogRunnable);
+            watchdogRunnable = null;
+        }
+    }
+
+    private void cancelReconnect() {
+        if (reconnectRunnable != null) {
+            ui.removeCallbacks(reconnectRunnable);
+            reconnectRunnable = null;
+        }
+    }
+
+    /**
+     * Mirrors btCentral.py reconnect trigger:
+     * - stops ping + watchdog
+     * - clears stale BLE queues (= reset FrameParser)
+     * - resets device clock state (= reset DeviceClockExtender)
+     * - opens a new frames_*.bin segment in the SAME sessionDir (same tennis session)
+     * - schedules reconnect with exponential backoff
+     */
+    private void triggerReconnect(String reason) {
+        if (!recording) return;
+        Log.w(TAG, "triggerReconnect: reason=" + reason + " attempt=" + (reconnectCount + 1));
+
+        stopPingTimer();
+        stopWatchdog();
+        cancelReconnect();
+        try { BleManager.getInstance().stopNotify(bleDevice, NUS_SERVICE_UUID, NUS_TX_CHAR_UUID); } catch (Exception ignored) {}
+
+        // Clear stale BLE data (mirrors btCentral.py: clear queue + reset FrameParser)
+        qLog.clear();
+        qPlot.clear();
+
+        // Reset device clock state (mirrors btCentral.py: reset DeviceClockExtender + last_frame_seq)
+        wrapCount = 0;
+        lastTFrameU32 = -1;
+        t0SessionUs = -1;
+
+        // Open a new frames segment in the SAME sessionDir (same tennis session).
+        // Multiple frames_*.bin files in one session dir is intentional — writeMetaJson()
+        // already lists all of them automatically.
+        if (sessionDir != null) {
+            try {
+                if (out != null) { out.flush(); out.close(); out = null; }
+                String ts = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
+                framesFile = new File(sessionDir, "frames_" + ts + ".bin");
+                openOutput();
+                Log.i(TAG, "triggerReconnect: new segment -> " + framesFile.getName());
+            } catch (Exception e) {
+                Log.e(TAG, "triggerReconnect: failed to open new frames file", e);
+            }
+        }
+
+        reconnectCount++;
+        scheduleReconnect();
+    }
+
+    /**
+     * Schedules a single reconnect attempt after exponential backoff.
+     * On success: resets backoff, re-subscribes notify + restarts watchdog.
+     * On failure: doubles backoff (cap 20s), retries.
+     */
+    private void scheduleReconnect() {
+        if (!recording) return;
+
+        final int backoff = reconnectBackoffMs;
+        reconnectBackoffMs = Math.min(MAX_RECONNECT_BACKOFF_MS, reconnectBackoffMs * 2);
+
+        runOnUiThread(() -> txtStatus.setText(
+                "Reconnecting... (attempt " + reconnectCount + ", wait " + (backoff / 1000f) + "s)"));
+
+        reconnectRunnable = () -> {
+            if (!recording) return;
+            runOnUiThread(() -> txtStatus.setText("Reconnecting... (attempt " + reconnectCount + ")"));
+
+            BleManager.getInstance().connect(bleDevice, new BleGattCallback() {
+                @Override public void onStartConnect() {}
+
+                @Override public void onConnectFail(BleDevice device, BleException exception) {
+                    Log.w(TAG, "Reconnect attempt " + reconnectCount + " failed: " + exception);
+                    reconnectCount++;
+                    scheduleReconnect();
+                }
+
+                @Override public void onConnectSuccess(BleDevice device, BluetoothGatt gatt, int status) {
+                    Log.i(TAG, "Reconnected after " + reconnectCount + " attempt(s)");
+                    reconnectBackoffMs = 500; // reset backoff on success
+
+                    BleManager.getInstance().setMtu(bleDevice, 247, new BleMtuChangedCallback() {
+                        @Override public void onMtuChanged(int mtu) {
+                            runOnUiThread(() -> txtStatus.setText(
+                                    "Reconnected! MTU=" + mtu + " (recon#" + reconnectCount + ")"));
+                            subscribeNotifyAndStartPing();
+                        }
+                        @Override public void onSetMTUFailure(BleException exception) {
+                            runOnUiThread(() -> txtStatus.setText(
+                                    "Reconnected! (MTU fail, recon#" + reconnectCount + ")"));
+                            subscribeNotifyAndStartPing();
+                        }
+                    });
+                }
+
+                @Override public void onDisConnected(boolean isActiveDisConnected, BleDevice device,
+                                                     BluetoothGatt gatt, int status) {
+                    // Watchdog will detect this within WATCHDOG_INTERVAL_MS and trigger another cycle
+                    Log.w(TAG, "onDisConnected during reconnect, isActive=" + isActiveDisConnected);
+                }
+            });
+        };
+
+        ui.postDelayed(reconnectRunnable, backoff);
+    }
+
+    // ───────────────────────────────────────────────────────────────────────
 
     // ── Inner classes ───────────────────────────────────────────────────────
 
