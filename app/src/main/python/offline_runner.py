@@ -50,7 +50,7 @@ from btcentral_offline_decode import (
     FrameParser, DeviceClockExtender,
     decode_emg, decode_imu, decode_vitals,
     SegmentCsv, _read_len_prefixed_frames,
-    TLV_EMG_BATCH, TLV_IMU_BATCH, TLV_VITALS,
+    TLV_EMG_BATCH, TLV_IMU_BATCH, TLV_VITALS, TLV_HOST_MS,
 )
 
 # ---------------------------------------------------------------------------
@@ -160,6 +160,16 @@ def _decode_bin_direct(bin_path: Path, out_dir: Path,
             if t0_dev_us is None:
                 t0_dev_us = dev_frame_us
 
+            # Pre-scan TLVs for TLV_HOST_MS (0x04).
+            # Android Java writes System.currentTimeMillis() per BLE notification.
+            # Falls back to 0 for legacy frames without this TLV.
+            frame_host_ms: int = 0
+            for tlv_t, tlv_v in tlvs:
+                if tlv_t == TLV_HOST_MS and len(tlv_v) >= 8:
+                    import struct as _struct  # noqa: PLC0415
+                    frame_host_ms = int(_struct.unpack_from("<Q", tlv_v, 0)[0])
+                    break
+
             for t, v in tlvs:
                 if t == TLV_EMG_BATCH:
                     seq0, t0_off, sr_hz, ch, samples = decode_emg(v)
@@ -172,7 +182,7 @@ def _decode_bin_direct(bin_path: Path, out_dir: Path,
                         rawv = int(samples[i, 1]) if ch > 1 else 0
                         ref = int(samples[i, 2]) if ch > 2 else 0
                         _get_emg_w(seg_idx, sr_hz, ch).writerow(
-                            [int(dev_us), int(seq0 + i), env, rawv, ref, int(frame_seq), 0])
+                            [int(dev_us), int(seq0 + i), env, rawv, ref, int(frame_seq), frame_host_ms])
                     stats["emg_samples"] += int(samples.shape[0])
 
                 elif t == TLV_IMU_BATCH:
@@ -188,7 +198,7 @@ def _decode_bin_direct(bin_path: Path, out_dir: Path,
                             int(dev_us), int(seq0 + i), ax, ay, az, gx, gy, gz,
                             acc_fsr_g if acc_fsr_g is not None else "",
                             gyro_fsr_dps if gyro_fsr_dps is not None else "",
-                            int(frame_seq), 0])
+                            int(frame_seq), frame_host_ms])
                     stats["imu_samples"] += int(samples.shape[0])
 
                 elif t == TLV_VITALS:
@@ -200,7 +210,7 @@ def _decode_bin_direct(bin_path: Path, out_dir: Path,
                         "" if vit["spo2"] is None else int(vit["spo2"]),
                         "" if vit["hr"] is None else float(vit["hr"]),
                         int(age_ms), int(vit["flags"]), int(vit["brightness"]),
-                        int(frame_seq), 0])
+                        int(frame_seq), frame_host_ms])
                     stats["vitals_records"] += 1
 
     for w in emg_writers.values():
@@ -321,6 +331,115 @@ def process_session(bin_path: str, out_dir: Optional[str] = None,
         shutil.rmtree(decode_dir)
     stats = _decode_bin_direct(p, decode_dir, session_id, float(rotate_min))
     return json.dumps(stats)
+
+
+def analyze_tennis_session(captures_dir: str, session_id: str,
+                           emg_fs_hz: float,
+                           rotate_min: float = 20.0,
+                           gap_thr_min: float = SESSION_GAP_MIN,
+                           win_sec: float = 1.0,
+                           step_sec: float = 0.25,
+                           warmup_skip_min: float = 5.0,
+                           baseline_swings: int = 20,
+                           swing_pre_ms: float = 250.0,
+                           swing_post_ms: float = 450.0,
+                           mdf_pad_ms: float = 300.0) -> str:
+    """Full pipeline: decode all BLE captures for a session, stitch by host_rx_ms,
+    and run swing detection + fatigue analysis.
+
+    This is the Android equivalent of emg_util_yaml_runner.analyze_tennis_session()
+    on Windows. It handles:
+      - Multiple frames_*.bin files (BLE reconnects, ESP32 resets)
+      - Physical timeline construction via host_rx_ms (TLV_HOST_MS = 0x04)
+      - Stitching across captures: sort all decoded rows by ts_ms (= host_rx_ms)
+      - Swing detection on the stitched IMU timeline
+      - Per-swing EMG features + fatigue baseline
+
+    Pipeline
+    --------
+    1. decode: process_tennis_session() → per-capture decoded_frames_*/ dirs
+    2. stitch: stitch_decoded_session_from_paths() → sorted by ts_ms
+    3. analyze: windowed features + swing detection + baseline + fatigue
+
+    Args:
+        captures_dir:    flat directory containing all frames_*.bin files
+        session_id:      YYYYMMDD_HHMMSS of the first capture in the session
+        emg_fs_hz:       EMG sampling rate in Hz (e.g. 2000.0)
+        rotate_min:      CSV rotation interval in minutes (default 20)
+        gap_thr_min:     session boundary gap in minutes (default 30)
+        win_sec:         windowed feature window size in seconds (default 1.0)
+        step_sec:        windowed feature step size in seconds (default 0.25)
+        warmup_skip_min: minutes to skip for baseline selection (default 5.0)
+        baseline_swings: number of baseline swings to use (default 20)
+        swing_pre_ms:    pre-peak window for swing detection (default 250 ms)
+        swing_post_ms:   post-peak window for swing detection (default 450 ms)
+        mdf_pad_ms:      MDF computation padding (default 300 ms)
+
+    Returns:
+        JSON string with full analysis results:
+          session_id, n_captures, capture_ids, reconnection_times_s,
+          window_feats, swing_windows, swing_feats, baseline, summary
+
+    Java usage:
+        String json = mod.callAttr("analyze_tennis_session",
+                          capturesDir, sessionId, 2000.0).toString();
+        JSONObject res = new JSONObject(json);
+        int numSwings = res.getJSONObject("summary").getInt("num_swings");
+    """
+    try:
+        from emg_util.emg_util_nopandas import stitch_decoded_session_from_paths
+    except ImportError:
+        from emg_util_nopandas import stitch_decoded_session_from_paths  # type: ignore
+
+    # Step 1: Decode all frames_*.bin files for this session
+    decode_json = process_tennis_session(captures_dir, session_id,
+                                         rotate_min, gap_thr_min)
+    decode_result = json.loads(decode_json)
+
+    if "error" in decode_result:
+        return json.dumps(decode_result)
+
+    emg_paths = decode_result.get("emg_csv_paths", [])
+    imu_paths = decode_result.get("imu_csv_paths", [])
+
+    if not emg_paths:
+        return json.dumps({
+            "error": "No EMG CSV files found after decoding",
+            "decode_result": decode_result,
+        })
+
+    # Step 2+3: Stitch all decoded CSVs by ts_ms and run full analysis.
+    # ts_ms = host_rx_ms (from TLV_HOST_MS) when non-zero, else dev_us/1000.
+    # Sorting by ts_ms constructs the physical timeline across all captures:
+    #   - BLE reconnect gaps are preserved (host_rx_ms jumps forward)
+    #   - ESP32 resets are handled (host_rx_ms is continuous, dev_us resets)
+    try:
+        result = stitch_decoded_session_from_paths(
+            emg_paths=emg_paths,
+            imu_paths=imu_paths,
+            emg_fs_hz=float(emg_fs_hz),
+            win_sec=float(win_sec),
+            step_sec=float(step_sec),
+            warmup_skip_min=float(warmup_skip_min),
+            baseline_swings=int(baseline_swings),
+            swing_pre_ms=float(swing_pre_ms),
+            swing_post_ms=float(swing_post_ms),
+            mdf_pad_ms=float(mdf_pad_ms),
+        )
+        # Attach session metadata
+        result["session_id"] = session_id
+        result["n_captures"] = decode_result.get("n_captures", 0)
+        result["capture_ids"] = decode_result.get("capture_ids", [])
+        result["reconnection_times_s"] = decode_result.get("reconnection_times_s", [])
+        result["emg_csv_paths"] = emg_paths
+        result["imu_csv_paths"] = imu_paths
+        return json.dumps(result, default=lambda x: None if (x != x) else x)
+    except Exception as e:
+        return json.dumps({
+            "error": str(e),
+            "session_id": session_id,
+            "decode_result": decode_result,
+        })
 
 
 def process_tennis_session(captures_dir: str, session_id: str,

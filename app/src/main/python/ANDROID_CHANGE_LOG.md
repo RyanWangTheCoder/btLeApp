@@ -5,6 +5,160 @@ Format: newest entry at the top.
 
 ---
 
+## [2026-03-05] — Physical timeline stitching across BLE reconnects & ESP32 resets
+
+### Problem Being Solved
+
+Before this change, multi-capture stitching relied on `dev_us` (ESP32 device clock).
+This produced **wrong timestamps** in three common scenarios:
+
+| Scenario | What happened | Impact |
+|---|---|---|
+| **ESP32 reset** between captures | `dev_us` restarts from 0 → timestamps overlap | Swings from capture 2 appear at t=0, mixed with capture 1 |
+| **BLE reconnect gap** (5–30 s) | `dev_us` continues but gap is invisible | Swing intervals appear shorter than reality; fatigue timeline compressed |
+| **uint32 wrap** after ~71 min | `DeviceClockExtender` handles within one file, but not across files | Timestamps jump backward at file boundary |
+
+### Solution: Three-Layer Fix
+
+#### Layer 1 — `TLV_HOST_MS` protocol extension (`SessionCaptureActivity.java`)
+
+New TLV type `0x04` injected by Android Java into every frame **before** writing to
+`frames.bin`. Value = `System.currentTimeMillis()` (wall-clock ms, uint64 LE).
+
+```
+Frame wire format (after this change):
+  [14-byte header]
+  [TLV 0x04: type(1) + len=8(2) + hostMs_u64_le(8)]  ← NEW: 11 bytes
+  [TLV 0x01: EMG batch]
+  [TLV 0x02: IMU batch]
+  [TLV 0x03: vitals]
+  [CRC-16/CCITT (2)]
+```
+
+`injectHostTimestamp(frame, hostMs)` in `SessionCaptureActivity.java`:
+- Prepends the 11-byte TLV to the payload
+- Updates `payload_len` in the 14-byte header
+- Recomputes CRC-16/CCITT if the CRC flag (`flags & 0x01`) is set
+- Returns original frame unchanged if frame is too short or malformed
+
+**ESP32 firmware: NO CHANGE NEEDED.** The TLV is added by Android, not the device.
+
+**Backward compatible:** Old decoders ignore unknown TLV types. Old `frames.bin` files
+without `TLV_HOST_MS` fall back to `host_rx_ms = 0` → `ts_ms = dev_us / 1000`.
+
+#### Layer 2 — Decoder writes `host_rx_ms` column (`btcentral_offline_decode.py`, `offline_runner.py`)
+
+Both decoders pre-scan TLVs per frame to extract `frame_host_ms` before processing
+data TLVs. The value is written as `host_rx_ms` in every row of `emg_log_*.csv`,
+`imu_log_*.csv`, and `vitals_log.csv`.
+
+#### Layer 3 — Stitcher uses `host_rx_ms` as `ts_ms` (`emg_util_nopandas.py`)
+
+`load_decoded_emg_csv()` and `load_decoded_imu_csv()` now select `ts_ms` as:
+```python
+ts_ms = host_rx_ms  if host_rx_ms is non-zero and finite
+ts_ms = dev_us/1000 otherwise  (legacy files)
+```
+
+`stitch_decoded_session_from_paths()` sorts all rows by `ts_ms` → physical timeline.
+
+### New Function: `stitch_decoded_session_from_paths()` (`emg_util_nopandas.py`)
+
+The previous `stitch_decoded_session(decoded_dir)` only worked for a **single**
+`decoded/` directory (session-dir layout from `btcentral_offline_decode.py`).
+
+For the **flat-folder layout** (`offline_runner.py` output), each `frames_*.bin` is
+decoded into its own `decoded_frames_*/` directory. There was no function to stitch
+across multiple directories.
+
+**New function:**
+```python
+stitch_decoded_session_from_paths(
+    emg_paths: List[Path],   # from any number of decoded_frames_*/ dirs
+    imu_paths: List[Path],
+    emg_fs_hz: float,
+    ...
+) -> Dict
+```
+
+Physical timeline construction inside this function:
+1. Load all EMG rows from all paths → concatenate
+2. Sort by `ts_ms` (= `host_rx_ms`) → gaps between captures preserved
+3. Filter invalid rows
+4. Rebuild uniform timestamp axis (for windowed feature computation)
+5. Same for IMU rows
+6. Run windowed features → swing detection → baseline → fatigue
+
+`stitch_decoded_session(decoded_dir)` is now a thin wrapper that globs
+`emg_log_*.csv` / `imu_log_*.csv` from a single dir and calls
+`stitch_decoded_session_from_paths()`.
+
+### New Function: `analyze_tennis_session()` (`offline_runner.py`)
+
+Full end-to-end pipeline callable from Java:
+
+```python
+analyze_tennis_session(
+    captures_dir,   # flat dir with all frames_*.bin
+    session_id,     # YYYYMMDD_HHMMSS of first capture
+    emg_fs_hz,      # e.g. 2000.0
+    ...
+) -> str  # JSON
+```
+
+Pipeline:
+1. `process_tennis_session()` → decode all `frames_*.bin` → per-capture `decoded_frames_*/` dirs
+2. Collect all `emg_log_*.csv` and `imu_log_*.csv` paths
+3. `stitch_decoded_session_from_paths()` → sort by `ts_ms` → physical timeline
+4. Windowed features + swing detection + baseline + fatigue
+
+Returns JSON with `summary`, `swing_windows`, `swing_feats`, `baseline`,
+`window_feats`, `session_id`, `n_captures`, `capture_ids`, `reconnection_times_s`.
+
+**Java usage:**
+```java
+String json = mod.callAttr("analyze_tennis_session",
+    capturesDir, sessionId, 2000.0).toString();
+JSONObject res = new JSONObject(json);
+int numSwings = res.getJSONObject("summary").getInt("num_swings");
+```
+
+### Stitching Flow (complete picture)
+
+```
+BLE notification arrives
+  → SessionCaptureActivity.injectHostTimestamp(data, System.currentTimeMillis())
+  → frames_20260225_140000.bin  host_rx_ms = 1740492000000 … 1740492025000
+
+[5-second BLE reconnect gap — new frames_*.bin opened by triggerReconnect()]
+
+  → frames_20260225_140005.bin  host_rx_ms = 1740492025000 … 1740492030000
+
+[8-second BLE reconnect gap]
+
+  → frames_20260225_140013.bin  host_rx_ms = 1740492030000 … 1740492045000
+
+analyze_tennis_session()
+  step 1: decode each frames_*.bin → decoded_frames_*/emg_log_*.csv (host_rx_ms column)
+  step 2: stitch_decoded_session_from_paths([all emg_log_*.csv], [all imu_log_*.csv])
+            sort by ts_ms (= host_rx_ms)
+            → correct wall-clock timeline with visible gaps ✅
+            → swing detection sees correct inter-swing intervals ✅
+            → fatigue analysis uses correct session duration ✅
+  step 3: windowed features + swing detection + baseline + fatigue → JSON
+```
+
+### Files Changed
+
+| File | Change |
+|---|---|
+| `SessionCaptureActivity.java` | `TLV_HOST_MS = 0x04` constant; `injectHostTimestamp()` method; `onCharacteristicChanged()` injects TLV before `qLog` |
+| `btcentral_offline_decode.py` | `TLV_HOST_MS = 0x04`; per-frame pre-scan; `host_rx_ms` column in all CSVs |
+| `offline_runner.py` | Imports `TLV_HOST_MS`; same pre-scan in `_decode_bin_direct()`; new `analyze_tennis_session()` |
+| `emg_util_nopandas.py` | `load_decoded_emg_csv/imu_csv()` use `host_rx_ms` as `ts_ms`; new `stitch_decoded_session_from_paths()`; `stitch_decoded_session()` refactored as thin wrapper |
+
+---
+
 ## [2026-03-03] — IMU fixed-scale bug fix (`IMU_FIXED_MAX`)
 
 ### Fixed

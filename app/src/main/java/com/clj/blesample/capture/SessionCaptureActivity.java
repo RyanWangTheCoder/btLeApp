@@ -62,7 +62,11 @@ public class SessionCaptureActivity extends AppCompatActivity {
     private static final byte MAGIC1 = (byte)0x5A;
     private static final int TLV_EMG_BATCH = 0x01;
     private static final int TLV_IMU_BATCH = 0x02;
-    private static final int TLV_VITALS = 0x03;
+    private static final int TLV_VITALS    = 0x03;
+    /** Host-side wall-clock timestamp injected by Android per BLE notification.
+     *  TLV value: uint64 little-endian = System.currentTimeMillis().
+     *  Enables correct multi-capture stitching across BLE reconnects / ESP32 resets. */
+    private static final int TLV_HOST_MS   = 0x04;
 
     private static final int ENV_PLOT_HZ = 50;
     private static final int IMU_PLOT_HZ = 200;  // Plot IMU at full rate for smooth waveforms
@@ -355,10 +359,13 @@ public class SessionCaptureActivity extends AppCompatActivity {
                     @Override public void onCharacteristicChanged(byte[] data) {
                         if (!recording) return;
                         lastNotifyMs = System.currentTimeMillis(); // watchdog heartbeat
-                        byte[] a = data.clone();
-                        byte[] b = data.clone();
-                        qLog.offer(a);
-                        qPlot.offer(b);
+                        // Inject TLV_HOST_MS (0x04) into the frame payload before writing
+                        // to frames.bin. The Python decoder reads host_rx_ms from this TLV
+                        // and uses it as ts_ms, enabling correct stitching across BLE
+                        // reconnects and ESP32 resets (where dev_us resets to 0).
+                        byte[] withHostTs = injectHostTimestamp(data, lastNotifyMs);
+                        qLog.offer(withHostTs);
+                        qPlot.offer(data.clone()); // plot path uses original (no TLV needed)
                     }
                 }
         );
@@ -1022,6 +1029,66 @@ public class SessionCaptureActivity extends AppCompatActivity {
         float a = emgRawBuf.latestX();
         float b = imuBuf.latestX();
         return Math.max(a, b);
+    }
+
+    /**
+     * Inject a TLV_HOST_MS (0x04) TLV into the frame payload.
+     *
+     * The TLV is prepended to the existing payload so the Python decoder can
+     * find it in a pre-scan before processing data TLVs (EMG/IMU/vitals).
+     *
+     * TLV wire format: type(1 B) + length(2 B LE) + value(8 B LE uint64) = 11 bytes
+     *
+     * The payload_len field in the 14-byte header is updated to include the new
+     * TLV, and the CRC-16/CCITT is recomputed when the CRC flag (flags & 0x01)
+     * is set in the frame header.
+     *
+     * @param frame  original BLE notification bytes (unmodified)
+     * @param hostMs System.currentTimeMillis() captured at BLE notification time
+     * @return new frame bytes with TLV_HOST_MS prepended to payload;
+     *         returns original frame unchanged if it is too short or malformed
+     */
+    private byte[] injectHostTimestamp(byte[] frame, long hostMs) {
+        if (frame.length < HEADER_LEN + CRC_LEN) return frame;
+
+        int origPayloadLen = u16le(frame, 12);
+        int origTotalLen   = HEADER_LEN + origPayloadLen + CRC_LEN;
+        if (origTotalLen > frame.length) return frame; // malformed — don't touch
+
+        // TLV_HOST_MS: type(1) + len_u16_le(2) + value_u64_le(8) = 11 bytes
+        final int TLV_SIZE     = 11;
+        int newPayloadLen      = origPayloadLen + TLV_SIZE;
+        int newTotalLen        = HEADER_LEN + newPayloadLen + CRC_LEN;
+
+        byte[] out = new byte[newTotalLen];
+
+        // 1. Copy original 14-byte header
+        System.arraycopy(frame, 0, out, 0, HEADER_LEN);
+
+        // 2. Update payload_len field (bytes 12-13, little-endian)
+        out[12] = (byte)(newPayloadLen & 0xFF);
+        out[13] = (byte)((newPayloadLen >> 8) & 0xFF);
+
+        // 3. Write TLV_HOST_MS at the start of the payload
+        out[HEADER_LEN + 0] = (byte) TLV_HOST_MS; // type = 0x04
+        out[HEADER_LEN + 1] = 8;                   // length low byte  (8 bytes of value)
+        out[HEADER_LEN + 2] = 0;                   // length high byte
+        ByteBuffer.wrap(out, HEADER_LEN + 3, 8)
+                  .order(ByteOrder.LITTLE_ENDIAN)
+                  .putLong(hostMs);                 // uint64 LE wall-clock ms
+
+        // 4. Copy original payload after the new TLV
+        System.arraycopy(frame, HEADER_LEN, out, HEADER_LEN + TLV_SIZE, origPayloadLen);
+
+        // 5. Recompute CRC if the CRC flag (bit 0 of flags byte) is set
+        int flags = frame[3] & 0xFF;
+        if ((flags & 0x01) != 0) {
+            int crc = crc16_ccitt(out, 0, HEADER_LEN + newPayloadLen);
+            out[HEADER_LEN + newPayloadLen]     = (byte)(crc & 0xFF);
+            out[HEADER_LEN + newPayloadLen + 1] = (byte)((crc >> 8) & 0xFF);
+        }
+
+        return out;
     }
 
     private static int u16le(byte[] b, int off) {

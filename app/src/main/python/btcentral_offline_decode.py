@@ -9,8 +9,14 @@ Design goals:
 - Output schemas aligned with btCentral.py on Windows.
 - Session-local outputs: decoded/ folder is deleted+recreated each run.
 
-Notes:
-- host_rx_ms cannot be reconstructed offline; we write 0.
+host_rx_ms:
+  Written from TLV_HOST_MS (0x04) when present in the frame payload.
+  Android Java writes System.currentTimeMillis() as a uint64 LE TLV per BLE notification.
+  Falls back to 0 for legacy frames without TLV_HOST_MS (backward compatible).
+  This enables correct multi-capture stitching in emg_util_nopandas.py across:
+    - BLE reconnects (no ESP32 reset)
+    - ESP32 resets (dev_us restarts from 0, new frames_*.bin file)
+    - uint32 dev_us wrap after ~71 min (handled by DeviceClockExtender within a file)
 """
 
 import os
@@ -32,6 +38,7 @@ CRC_LEN = 2
 TLV_EMG_BATCH = 0x01
 TLV_IMU_BATCH = 0x02
 TLV_VITALS    = 0x03
+TLV_HOST_MS   = 0x04  # Android host timestamp: System.currentTimeMillis() as uint64 LE (8 bytes)
 
 FLAG_CRC16 = 0x01
 FLAG_IMU_META_V2 = 0x02
@@ -368,6 +375,15 @@ def decode_frames_bin_to_rotated_csv(session_dir: str, rotate_min: float = 20.0,
                     t0_dev_us = dev_frame_us
                     stats["t0_dev_us"] = int(t0_dev_us)
 
+                # Pre-scan TLVs for TLV_HOST_MS (0x04).
+                # Android Java writes System.currentTimeMillis() per BLE notification.
+                # Falls back to 0 for legacy frames without this TLV.
+                frame_host_ms: int = 0
+                for tlv_t, tlv_v in tlvs:
+                    if tlv_t == TLV_HOST_MS and len(tlv_v) >= 8:
+                        frame_host_ms = int(struct.unpack_from("<Q", tlv_v, 0)[0])
+                        break
+
                 for t, v in tlvs:
                     if t == TLV_EMG_BATCH:
                         seq0, t0_off, sr_hz, ch, samples = decode_emg(v)
@@ -381,7 +397,7 @@ def decode_frames_bin_to_rotated_csv(session_dir: str, rotate_min: float = 20.0,
                             rawv = int(samples[i, 1]) if ch > 1 else 0
                             ref = int(samples[i, 2]) if ch > 2 else 0
                             get_emg_writer(seg_idx, sr_hz, ch).writerow([
-                                int(dev_us), int(seq0 + i), env, rawv, ref, int(frame_seq), 0
+                                int(dev_us), int(seq0 + i), env, rawv, ref, int(frame_seq), frame_host_ms
                             ])
                         stats["emg_samples"] += int(samples.shape[0])
 
@@ -397,7 +413,7 @@ def decode_frames_bin_to_rotated_csv(session_dir: str, rotate_min: float = 20.0,
                                 int(dev_us), int(seq0 + i), ax, ay, az, gx, gy, gz,
                                 acc_fsr_g if acc_fsr_g is not None else "",
                                 gyro_fsr_dps if gyro_fsr_dps is not None else "",
-                                int(frame_seq), 0
+                                int(frame_seq), frame_host_ms
                             ])
                         stats["imu_samples"] += int(samples.shape[0])
 
@@ -410,7 +426,7 @@ def decode_frames_bin_to_rotated_csv(session_dir: str, rotate_min: float = 20.0,
                             "" if vit["spo2"] is None else int(vit["spo2"]),
                             "" if vit["hr"] is None else float(vit["hr"]),
                             int(age_ms), int(vit["flags"]), int(vit["brightness"]),
-                            int(frame_seq), 0
+                            int(frame_seq), frame_host_ms
                         ])
                         stats["vitals_records"] += 1
 
