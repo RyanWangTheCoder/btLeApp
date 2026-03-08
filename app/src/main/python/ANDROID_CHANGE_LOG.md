@@ -5,6 +5,33 @@ Format: newest entry at the top.
 
 ---
 
+## [2026-03-07] — Align real-time swing detection thresholds with offline pipeline
+
+### Changed (`SessionCaptureActivity.java`)
+
+- **`imuThreshold` default: 150 → 300 dps** — aligns with `sensordata_plotter.py`
+  (`ThresholdSwingDetector` default 300 dps) and offline `detect_swing_windows_from_imu()`
+  (300 dps). The old 150 dps default caused 2× more false-positive detections during
+  non-swing arm movements (walking, reaching), polluting the fatigue baseline.
+  - The SeekBar UI still allows the user to adjust 50–500 dps at runtime.
+  - SeekBar initial position updated to reflect the new 300 dps default.
+
+- **`MARKER_DEBOUNCE_US`: 1 000 000 → 2 000 000 µs (1 s → 2 s)** — aligns with
+  offline `min_gap_ms=2000` and plotter `debounce_sec=2.0`. The old 1 s debounce
+  allowed double-counting of backswing + forward swing on slow strokes.
+
+### Why these values
+
+| Parameter | Old | New | Offline / Plotter |
+|---|---|---|---|
+| Gyro threshold | 150 dps | **300 dps** | 300 dps |
+| Debounce | 1 s | **2 s** | 2 s |
+
+Tennis forehand/backhand peak gyro: 400–800 dps. Walking arm swing: 100–200 dps.
+300 dps sits cleanly between the two distributions.
+
+---
+
 ## [2026-03-05] — Physical timeline stitching across BLE reconnects & ESP32 resets
 
 ### Problem Being Solved

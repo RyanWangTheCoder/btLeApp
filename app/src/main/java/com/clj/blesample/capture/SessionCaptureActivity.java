@@ -139,9 +139,9 @@ public class SessionCaptureActivity extends AppCompatActivity {
     private volatile boolean frozen = false;
     private volatile float windowSec = 10f;
 
-    private volatile float imuThreshold = 150f;  // Gyroscope threshold in dps (degrees per second)
+    private volatile float imuThreshold = 300f;  // Gyroscope threshold in dps (degrees per second)
     private volatile long lastMarkerUs = 0;
-    private static final long MARKER_DEBOUNCE_US = 1_000_000;  // 1 second debounce
+    private static final long MARKER_DEBOUNCE_US = 2_000_000;  // 2 second debounce (aligns with offline + plotter)
     
     // Peak detection state
     private volatile float lastGyroMag = 0f;
