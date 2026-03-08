@@ -188,15 +188,19 @@ def analyze_session(session_dir: str) -> str:
         
         from emg_util_nopandas import stitch_decoded_session
         
-        # Run full analysis (handles multiple decoded CSVs automatically)
+        # Run full analysis (handles multiple decoded CSVs automatically).
+        # Parameters must match emg_util_yaml_runner.py defaults on Windows:
+        #   emg_fs_hz=2000.0  (MyoWare 2.0 ADC at 2000 Hz — NOT 500 Hz)
+        #   baseline_swings=20 (matches FatigueMonitor and yaml_runner defaults)
+        #   thr_gyro_dps=300.0 (fixed threshold, replaces legacy swing_z_thr)
         results = stitch_decoded_session(
             decoded_dir=str(decoded_dir),
-            emg_fs_hz=500.0,  # EMG sampling rate
+            emg_fs_hz=2000.0,   # MyoWare 2.0 ADC: 2000 Hz
             win_sec=1.0,
             step_sec=0.25,
             warmup_skip_min=5.0,
-            baseline_swings=10,
-            swing_z_thr=5.0,
+            baseline_swings=20,  # matches yaml_runner + FatigueMonitor defaults
+            thr_gyro_dps=300.0,  # fixed threshold (replaces legacy swing_z_thr)
             swing_pre_ms=250.0,
             swing_post_ms=450.0,
             mdf_pad_ms=300.0,

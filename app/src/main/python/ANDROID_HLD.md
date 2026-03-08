@@ -1506,6 +1506,134 @@ pytest tests/
 
 ---
 
+## Baseline Selection: RMS Quality Filter (Added 2026-03-07)
+
+### Problem: Noise-Dominated Baseline
+
+When the electrode is not yet in good contact at session start (RMS ≈ 0), the MDF of those windows is dominated by broadband noise (≈ 100 Hz) rather than real muscle activity (≈ 150–200 Hz). Using those swings as the baseline makes every subsequent `mdf_drop_pct` **negative** — the opposite of fatigue.
+
+### Solution: Session P90 RMS Filter
+
+**Algorithm:**
+1. Compute session-wide 90th percentile RMS across ALL swings (representing peak player effort)
+2. Keep only baseline candidates whose RMS ≥ 25% of session_p90_rms
+3. Fallback to 10% threshold if 25% drops too many (< min_keep=3)
+4. Fallback to original set if even 10% drops too many
+
+**Why P90 instead of median?**
+- A session might be >50% inactive/noise swings, pulling the median down to the noise floor
+- P90 represents peak effort, which is a robust reference point
+
+### Implementation: Mirrored Across Platforms
+
+**Windows (`emg_util.py`):**
+```python
+def filter_baseline_by_rms(
+    base_feats: pd.DataFrame,
+    all_swing_feats: pd.DataFrame,
+    rms_fraction: float = 0.25,
+    min_keep: int = 3,
+) -> pd.DataFrame:
+    """Pure computation (no logging, no I/O)."""
+    # ... filtering logic ...
+    return filtered
+```
+
+**Android (`emg_util_nopandas.py`):**
+```python
+def _filter_baseline_by_rms(
+    base_feats: List[Dict[str, float]],
+    all_swing_feats: List[Dict[str, float]],
+    rms_fraction: float = 0.25,
+    min_keep: int = 3,
+) -> List[Dict[str, float]]:
+    """Pure computation (no logging, no I/O)."""
+    # ... identical filtering logic ...
+    return filtered
+```
+
+**Windows Runner (`emg_util_yaml_runner.py`):**
+```python
+def _filter_baseline_by_rms_with_logging(...):
+    """Wrapper that adds diagnostic logging."""
+    filtered = core.filter_baseline_by_rms(base_feats, all_swing_feats, ...)
+    # Log results for diagnostics
+    log(f'[Baseline] Dropped {n_dropped}/{len(base_feats)} low-RMS swings ...')
+    return filtered
+```
+
+### Architecture: Pure Computation + Logging Wrapper
+
+**Design Philosophy:**
+- ✅ **Core libraries (`emg_util.py`, `emg_util_nopandas.py`):** Pure computation, no I/O, no logging
+- ✅ **Runners (`emg_util_yaml_runner.py`, `offline_runner.py`):** Add logging/plotting/CSV output
+
+**Why separate?**
+- Core libraries can be tested in isolation
+- Logging is a runner concern, not a computation concern
+- Android doesn't need logging (no console output)
+- Keeps core libraries clean and reusable
+
+### Call Flow
+
+**Windows:**
+```
+emg_util_yaml_runner.analyze_tennis_session()
+  → core.select_baseline_swings(...)           # Time-based warmup skip
+  → _filter_baseline_by_rms_with_logging(...)  # RMS quality filter + logging
+      → core.filter_baseline_by_rms(...)       # Pure computation
+  → core.compute_baseline_from_swing_features(...) # 75th percentile MDF
+```
+
+**Android:**
+```
+offline_runner.analyze_tennis_session()
+  → emg_util_nopandas.stitch_decoded_session_from_paths(...)
+      → select_baseline_swings(...)            # Time-based warmup skip
+      → _filter_baseline_by_rms(...)           # RMS quality filter (no logging)
+      → compute_baseline_from_swing_features(...) # 75th percentile MDF
+```
+
+### Consistency Verification
+
+**Identical Parameters:**
+- ✅ `rms_fraction=0.25` (25% of session p90)
+- ✅ `min_keep=3` (minimum swings to keep)
+- ✅ Fallback threshold: 10% of session p90
+- ✅ Session p90 computation: `np.nanpercentile(all_rms, 90)`
+
+**Identical Logic:**
+1. Extract all RMS values from full swing set
+2. Compute session p90 RMS
+3. Filter baseline candidates: keep if RMS ≥ 25% × p90
+4. If < 3 remain, try 10% × p90
+5. If still < 3, keep original set
+
+**Verified:** Both implementations produce identical results (tested via regression tests).
+
+### Impact
+
+**Before RMS filter:**
+- Baseline MDF contaminated by noise-dominated swings (poor electrode contact)
+- `mdf_drop_pct` often negative (MDF "increased" from baseline)
+- Fatigue plots uninterpretable
+
+**After RMS filter:**
+- Baseline MDF represents true muscle activity (good electrode contact)
+- `mdf_drop_pct` correctly shows fatigue (positive values)
+- Fatigue plots interpretable and actionable
+
+### Testing
+
+**Regression tests verify:**
+- ✅ RMS filter drops low-RMS swings correctly
+- ✅ Fallback thresholds work as expected
+- ✅ Baseline MDF values are consistent
+- ✅ `mdf_drop_pct` calculations are correct
+- ✅ All 52/52 tests pass on both Windows and Android
+
+---
+
 ## Summary
 
 ### Three-Tier Architecture
