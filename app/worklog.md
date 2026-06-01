@@ -172,6 +172,75 @@ Testing in progress on Android 9 device.
 ### Status
 Phase 2 COMPLETE. Verified on Android 9: MDF drop 39.4%, HIGH fatigue badge, 48h rest recommendation displayed correctly.
 
+### Outstanding (not blocking)
+- `fatigue_monitor.py` + `emg_util_nopandas.py` copied into submodule path but not git-tracked
+  (git blocks staging files inside submodule). Fix: set up SSH key on Linux host and run
+  `git submodule update --init` — then the submodule commit pointer tracks the right version.
+- Debug `Log.d(TAG, "parseFatigueDisplay: ...")` left in code — remove before Play Store build.
+
+---
+
+## 2026-06-01 (continued) — Phase 3: Session History & Trends
+
+### New files created
+
+| File | Purpose |
+|------|---------|
+| `capture/SessionRecord.java` | POJO: ts, durationSec, swingCount, fatigueLevel, mdfDropPct; JSON serialization |
+| `capture/SessionHistoryManager.java` | Reads/writes `getFilesDir()/sessions.json`; capped at 50 entries |
+| `capture/TrendSparklineView.java` | Custom canvas view: MDF drop % trend, coloured dots per fatigue level |
+| `capture/SessionRowAdapter.java` | RecyclerView adapter — newest session first |
+| `capture/SessionHistoryActivity.java` | Sparkline + RecyclerView list + "Clear" button with confirmation dialog |
+| `res/layout/activity_session_history.xml` | Dark-background sparkline (140dp) + RecyclerView below |
+| `res/layout/item_session_row.xml` | Row: date, duration/swings/MDF stats, fatigue badge chip |
+
+### Files modified
+
+- `SessionSummaryActivity.java` — appends `SessionRecord` to history on every session (live + demo); added "View History" button
+- `activity_session_summary.xml` — "View History" button below "Done"
+- `MainActivity.java` + `activity_main.xml` — "History" button in main screen button row
+- `AndroidManifest.xml` — registered `SessionHistoryActivity`
+- `app/build.gradle` — added `androidx.recyclerview:recyclerview:1.2.1` dependency
+
+### Build result
+`assembleDebug` → BUILD SUCCESSFUL (6s, 71 tasks)
+
+### Verified on device
+Session history screen opens from both MainActivity and SessionSummaryActivity; sparkline and row list populate after completing a demo session.
+
+---
+
+## 2026-06-01 (continued) — Phase 4: Play Store Readiness (coding portion)
+
+### Adaptive icon
+
+- `res/drawable/ic_launcher_foreground.xml` — Android vector drawable from Material Symbols `monitor_heart` icon (white on transparent)
+- `res/drawable/ic_launcher_background.xml` — solid dark navy `#1A237E`
+- `res/mipmap-anydpi-v26/ic_launcher.xml` + `ic_launcher_round.xml` — adaptive icon wrappers
+- Source SVG saved at repo root: `monitor_heart_24dp.svg` (not used by build; kept for reference)
+- Legacy PNG mipmap files untouched — Android <8 devices continue to use them
+
+### App name & strings
+
+- Fixed typo in `strings.xml`: `AthletAssitant` → `Athlete EMG`
+- Added three permission rationale strings: `perm_bt_scan_rationale`, `perm_bt_connect_rationale`, `perm_location_rationale`
+
+### Onboarding screen (first-launch only)
+
+- `OnboardingActivity.java` + `activity_onboarding.xml` — dark navy branded screen; explains the app, hardware requirement, and Demo Mode
+- Two buttons: "Try Demo" (launches demo directly + marks onboarded) and "Got it — go to app" (dismisses)
+- `SharedPreferences` key `onboarded` (in `app_prefs`) — screen never shown again after first interaction
+- Registered in `AndroidManifest.xml`
+- `MainActivity.onCreate` checks `OnboardingActivity.isOnboarded(this)` and starts onboarding if false
+
+### Build result
+`assembleDebug` → BUILD SUCCESSFUL (3s, 71 tasks)
+
+### Remaining Phase 4 tasks (manual / out of Claude scope)
+- Privacy policy page (host at GitHub Pages; link from Play Store listing and in-app Settings)
+- Keystore generation + `signingConfigs` in `build.gradle` for release AAB
+- Play Console: create app, upload AAB to Open Testing track, fill store listing, add screenshots
+
 ---
 
 ## 2026-05-31 (continued) — Linux build environment setup

@@ -68,7 +68,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private LinearLayout layout_setting;
     private TextView txt_setting;
     private Button btn_scan, btn_monitor;
-    private Button btn_process, btn_record, btn_demo;
+    private Button btn_process, btn_record, btn_demo, btn_history;
     private EditText et_name, et_mac, et_uuid;
     private Switch sw_auto;
     private ImageView img_loading;
@@ -119,6 +119,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         initView();
+
+        if (!OnboardingActivity.isOnboarded(this)) {
+            startActivity(new Intent(this, OnboardingActivity.class));
+        }
 
         BleManager.getInstance().init(getApplication());
         BleManager.getInstance()
@@ -258,6 +262,9 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         btn_demo = (Button) findViewById(R.id.btn_demo);
         btn_demo.setText("Try Demo");
         btn_demo.setOnClickListener(this);
+        btn_history = (Button) findViewById(R.id.btn_history);
+        btn_history.setOnClickListener(v ->
+                startActivity(new Intent(this, com.clj.blesample.capture.SessionHistoryActivity.class)));
         et_name = (EditText) findViewById(R.id.et_name);
         et_mac = (EditText) findViewById(R.id.et_mac);
         et_uuid = (EditText) findViewById(R.id.et_uuid);

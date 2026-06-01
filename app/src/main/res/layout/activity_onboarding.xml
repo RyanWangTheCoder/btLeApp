@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#FF1A237E">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="32dp"
+        android:gravity="center_horizontal">
+
+        <!-- Icon -->
+        <ImageView
+            android:layout_width="96dp"
+            android:layout_height="96dp"
+            android:layout_marginTop="32dp"
+            android:layout_marginBottom="24dp"
+            android:src="@drawable/ic_launcher_foreground"
+            android:contentDescription="App icon" />
+
+        <!-- Title -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Athlete EMG"
+            android:textColor="#FFFFFFFF"
+            android:textSize="28sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Forearm fatigue monitoring for tennis"
+            android:textColor="#CCFFFFFF"
+            android:textSize="15sp"
+            android:gravity="center"
+            android:layout_marginBottom="40dp" />
+
+        <!-- What it does -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="What it does"
+            android:textColor="#FFFFFFFF"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Athlete EMG measures forearm muscle fatigue in real time while you play. It tracks EMG (muscle electrical activity) and detects swing events, then tells you when to rest — before your form breaks down."
+            android:textColor="#DDFFFFFF"
+            android:textSize="14sp"
+            android:lineSpacingMultiplier="1.5"
+            android:layout_marginBottom="32dp" />
+
+        <!-- Hardware -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Hardware required"
+            android:textColor="#FFFFFFFF"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="The app works with a custom ESP32 wearable sensor worn on the forearm. It connects over Bluetooth LE and streams EMG + IMU data to your phone."
+            android:textColor="#DDFFFFFF"
+            android:textSize="14sp"
+            android:lineSpacingMultiplier="1.5"
+            android:layout_marginBottom="32dp" />
+
+        <!-- No hardware callout -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="#33FFFFFF"
+            android:padding="16dp"
+            android:layout_marginBottom="40dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="No hardware? No problem."
+                android:textColor="#FFFFFFFF"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="6dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Try Demo Mode to replay a real tennis session with full fatigue analysis — no sensor needed."
+                android:textColor="#DDFFFFFF"
+                android:textSize="14sp"
+                android:lineSpacingMultiplier="1.5" />
+
+        </LinearLayout>
+
+        <!-- Buttons -->
+        <Button
+            android:id="@+id/btnOnboardingDemo"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Try Demo"
+            android:layout_marginBottom="12dp" />
+
+        <Button
+            android:id="@+id/btnOnboardingGotIt"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Got it — go to app"
+            style="@style/Widget.AppCompat.Button.Borderless"
+            android:textColor="#CCFFFFFF" />
+
+        <Button
+            android:id="@+id/btnOnboardingPrivacy"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginTop="8dp"
+            android:text="Privacy Policy"
+            style="@style/Widget.AppCompat.Button.Borderless"
+            android:textColor="#88FFFFFF"
+            android:textSize="12sp" />
+
+    </LinearLayout>
+</ScrollView>

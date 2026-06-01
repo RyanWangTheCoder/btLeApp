@@ -31,10 +31,19 @@
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".OnboardingActivity"
+            android:exported="false"
+            android:label="Welcome" />
+
+        <activity
+            android:name=".PrivacyPolicyActivity"
+            android:exported="false"
+            android:label="Privacy Policy" />
 
         <activity android:name=".operation.OperationActivity" />
         <activity android:name=".operation.PlotActivity" />
@@ -50,6 +59,11 @@
             android:name=".capture.SessionSummaryActivity"
             android:exported="false"
             android:label="Session Summary" />
+
+        <activity
+            android:name=".capture.SessionHistoryActivity"
+            android:exported="false"
+            android:label="Session History" />
 
     </application>
 

@@ -11,6 +11,8 @@ import androidx.appcompat.app.AppCompatActivity;
 import com.clj.blesample.R;
 
 import java.util.Locale;
+import java.util.Date;
+
 
 public class SessionSummaryActivity extends AppCompatActivity {
 
@@ -37,7 +39,8 @@ public class SessionSummaryActivity extends AppCompatActivity {
         TextView txtStats = findViewById(R.id.txtSummaryStats);
         TextView txtBadge = findViewById(R.id.txtFatigueBadge);
         TextView txtRec   = findViewById(R.id.txtRecommendation);
-        Button   btnDone  = findViewById(R.id.btnSummaryDone);
+        Button   btnDone    = findViewById(R.id.btnSummaryDone);
+        Button   btnHistory = findViewById(R.id.btnViewHistory);
 
         String dropStr = (mdfDropPct >= 0)
                 ? String.format(Locale.US, "%.1f%%", mdfDropPct)
@@ -93,6 +96,13 @@ public class SessionSummaryActivity extends AppCompatActivity {
         txtBadge.setBackgroundColor(badgeColor);
         txtRec.setText(rec);
 
+        // persist to history
+        SessionRecord record = new SessionRecord(
+                System.currentTimeMillis(), durationSec, swingCount, level, mdfDropPct);
+        new SessionHistoryManager(this).append(record);
+
         btnDone.setOnClickListener(v -> finish());
+        btnHistory.setOnClickListener(v ->
+                startActivity(new Intent(this, SessionHistoryActivity.class)));
     }
 }

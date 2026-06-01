@@ -1,0 +1,22 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="960"
+    android:viewportHeight="960">
+
+    <!--
+      monitor_heart icon from Material Symbols.
+      Original viewBox: 0 -960 960 960  (y-flipped coordinate system).
+      Translated here to a 0,0-origin 960×960 viewport for Android vector.
+      Path data shifted +960 in Y so all coordinates are positive.
+    -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="
+M80,360v-120q0-33 23.5-56.5T160,160h640q33,0 56.5,23.5T880,240v120h-80v-120H160v120H80z
+M160,800q-33,0 -56.5-23.5T80,720v-120h80v120h640v-120h80v120q0,33 -23.5,56.5T800,800H160z
+M421,674.5q10-5.5 15-16.5l124-248 44,88q5,11 15,16.5t21,5.5h240v-80H665l-69-138
+q-5-11 -15-15.5t-21-4.5q-11,0 -21,4.5T524,302L400,550l-44-88q-5-11 -15-16.5t-21-5.5H80v80
+h215l69,138q5,11 15,16.5t21,5.5q11,0 21-5.5z
+M480,480z" />
+</vector>
