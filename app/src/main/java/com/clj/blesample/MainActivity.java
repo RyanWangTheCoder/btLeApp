@@ -64,6 +64,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private static final String TAG = MainActivity.class.getSimpleName();
     private static final int REQUEST_CODE_OPEN_GPS = 1;
     private static final int REQUEST_CODE_PERMISSION_LOCATION = 2;
+    private static final int REQUEST_CODE_PERMISSION_BLUETOOTH = 3;
 
     private LinearLayout layout_setting;
     private TextView txt_setting;
@@ -483,6 +484,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                                                  @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         switch (requestCode) {
+            case REQUEST_CODE_PERMISSION_BLUETOOTH:
+                // All BT perms granted — proceed to location/scan flow
+                checkPermissions();
+                break;
             case REQUEST_CODE_PERMISSION_LOCATION:
                 if (grantResults.length > 0) {
                     for (int i = 0; i < grantResults.length; i++) {
@@ -504,6 +509,25 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         }
 
     private void checkPermissions() {
+        // Android 12+ (API 31+): request BLUETOOTH_SCAN + BLUETOOTH_CONNECT first;
+        // older devices use ACCESS_FINE_LOCATION for BLE scanning.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            List<String> btDenied = new ArrayList<>();
+            for (String p : new String[]{
+                    Manifest.permission.BLUETOOTH_SCAN,
+                    Manifest.permission.BLUETOOTH_CONNECT}) {
+                if (ContextCompat.checkSelfPermission(this, p) != PackageManager.PERMISSION_GRANTED) {
+                    btDenied.add(p);
+                }
+            }
+            if (!btDenied.isEmpty()) {
+                ActivityCompat.requestPermissions(this,
+                        btDenied.toArray(new String[0]),
+                        REQUEST_CODE_PERMISSION_BLUETOOTH);
+                return;
+            }
+        }
+
         BluetoothAdapter bluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
         if (!bluetoothAdapter.isEnabled()) {
             Toast.makeText(this, getString(R.string.please_open_blue), Toast.LENGTH_LONG).show();

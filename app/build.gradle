@@ -30,8 +30,28 @@ android {
 
     buildTypes {
         release {
-            minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            minifyEnabled true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            // Load keystore from release.keystore (not in git).
+            // Create with: keytool -genkey -v -keystore release.keystore
+            //               -alias athlete_emg -keyalg RSA -keysize 2048 -validity 10000
+            // Then set env vars or local.properties before bundleRelease:
+            //   KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD
+            if (file("../release.keystore").exists()) {
+                signingConfig signingConfigs.release
+            }
+        }
+        debug {
+            signingConfig signingConfigs.debug
+        }
+    }
+
+    signingConfigs {
+        release {
+            storeFile     file("../release.keystore")
+            storePassword System.getenv("KEYSTORE_PASSWORD") ?: ""
+            keyAlias      System.getenv("KEY_ALIAS")         ?: "athlete_emg"
+            keyPassword   System.getenv("KEY_PASSWORD")      ?: ""
         }
     }
     namespace 'com.clj.blesample'

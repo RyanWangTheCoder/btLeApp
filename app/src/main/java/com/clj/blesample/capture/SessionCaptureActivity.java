@@ -557,7 +557,6 @@ public class SessionCaptureActivity extends AppCompatActivity {
      *   baseline_swings_collected (int)
      */
     private String parseFatigueDisplay(String json) {
-        Log.d(TAG, "parseFatigueDisplay: " + json);
         try {
             JSONObject obj = new JSONObject(json);
             if (obj.has("error")) return "Fatigue: " + obj.getString("error");

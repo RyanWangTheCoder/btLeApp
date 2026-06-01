@@ -1,17 +1,21 @@
 # Add project specific ProGuard rules here.
-# By default, the flags in this file are appended to flags specified
-# in D:\development\AppData\sdk/tools/proguard/proguard-android.txt
-# You can edit the include path and order by changing the proguardFiles
-# directive in build.gradle.
-#
-# For more details, see
-#   http://developer.android.com/guide/developing/tools/proguard.html
 
-# Add any project specific keep options here:
+# ── Chaquopy Python runtime ──────────────────────────────────────────────────
+# Keep all Chaquopy classes; R8 must not rename or remove them.
+-keep class com.chaquo.python.** { *; }
+-dontwarn com.chaquo.python.**
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# ── emg_util Python modules (loaded by name at runtime) ──────────────────────
+# No Java/Kotlin classes to keep — Python files are bundled as assets by
+# Chaquopy and are never processed by R8.
+
+# ── FastBLE ───────────────────────────────────────────────────────────────────
+-keep class com.clj.fastble.** { *; }
+-dontwarn com.clj.fastble.**
+
+# ── App capture/analysis classes (referenced by name via reflection) ──────────
+-keep class com.clj.blesample.capture.** { *; }
+-keep class com.clj.blesample.processing.** { *; }
+
+# ── AndroidX / AppCompat ──────────────────────────────────────────────────────
+-dontwarn androidx.**
