@@ -94,6 +94,86 @@ Plan and begin Phase 1 (Demo Mode) of the Play Store release effort.
 
 ---
 
+## 2026-05-31 (continued) — Phase 1 polish + Phase 2 Session Summary
+
+### Phase 1 Polish (Step 4) — completed
+
+**Demo badge:**
+- Added `txtDemoBadge` TextView to `activity_capture.xml` (red, bold, hidden by default)
+- Shows `● DEMO MODE` on demo start; changes to `● DEMO COMPLETE` at EOF; hides on Stop
+- Fixed missing `btnStop.setOnClickListener` in demo branch — was skipped by early `return`
+
+**Completion summary:**
+- Tracks `demoSwingCount` (incremented alongside `markers.add()` in demo loop)
+- EOF status: "Demo complete — N swings detected"
+- `btnProcessSession` in demo shows Toast explaining live-sessions-only
+
+**Verified on device:** 42 swings detected, demo plays and stops correctly.
+
+---
+
+### Phase 2 — Session Summary Activity
+
+**New files:**
+- `app/src/main/java/com/clj/blesample/capture/SessionSummaryActivity.java`
+- `app/src/main/res/layout/activity_session_summary.xml`
+- Registered in `AndroidManifest.xml`
+
+**In `SessionCaptureActivity`:**
+- Added `lastFatigueLevel`, `lastMdfDropPct`, `sessionStartWallMs` fields
+- `parseFatigueDisplay()` now stores last level/drop% when baseline is ready
+- `launchSummary(swingCount)` helper builds Intent and starts `SessionSummaryActivity`
+- Called from `stopSession()` (live) and demo EOF (with queue-drain wait)
+
+**`SessionSummaryActivity` shows:**
+- Duration, swing count, MDF drop %
+- Colored badge: green=FRESH, orange=MODERATE, red=HIGH, grey=MONITORING
+- Recovery recommendation text per fatigue level
+- "Done" button returns to capture screen
+
+**Bug fix — baseline never reached at 4× demo speed:**
+- Root cause: `fatigueQueue` capacity was 1 with non-blocking `offer()` — all but 1 swing
+  dropped before Python processed 20 for baseline
+- Fix: queue capacity 1 → 64
+- Demo EOF now polls until `fatigueQueue.isEmpty()` (max 10s) before launching summary
+
+### Status
+Testing in progress on Android 9 device.
+
+---
+
+## 2026-06-01 — Phase 2 debug: fatigue analysis pipeline
+
+### Root causes found and fixed (in order)
+
+**1. `fatigue_monitor` not packaged (ModuleNotFoundError)**
+
+- `app/src/main/python/emg_util/` is a git submodule, SSH key not configured on Linux host → submodule never populated (empty dir)
+- Fix: copied `fatigue_monitor.py` + `emg_util_nopandas.py` directly from `/local/mnt/workspace/wangx/projects/emg_util/`
+- Required `./gradlew clean assembleDebug` — incremental build skipped Chaquopy repackage due to cached empty dir
+
+**2. `reset_fatigue_monitor` never executed (warmup=5 min applied to demo)**
+
+- `Python.start()` throws `IllegalStateException: Python already started` → aborted try block before `reset_fatigue_monitor` was called → old monitor (`warmup_skip_min=5.0`) stayed active → all 42 demo swings fell within warmup window → baseline never collected
+- Fix: added retry in catch block — call `reset_fatigue_monitor` directly via `Python.getInstance()` if `Python.start()` fails
+- Demo params: `warmup_skip_min=0.0`, `baseline_swings=5`
+
+**3. Double-threading artefact**
+
+- Two fatigue threads processed each swing (swing IDs doubled) — stale Chaquopy instance from prior APK; resolved with `adb uninstall` before install
+
+### Verified working (logcat 04:57 run)
+
+- `reset_fatigue_monitor OK (warmup=0, baseline=5)` confirmed
+- Baseline ready at swing #7, `baseline_mdf=332 Hz`
+- From swing #10: `fatigue_level: "high"`, `mdf_drop_pct: 40%`, `warning: true`
+- `SessionSummaryActivity` expected to show RED HIGH FATIGUE badge + 48h rest recommendation
+
+### Status
+Phase 2 COMPLETE. Verified on Android 9: MDF drop 39.4%, HIGH fatigue badge, 48h rest recommendation displayed correctly.
+
+---
+
 ## 2026-05-31 (continued) — Linux build environment setup
 
 ### Context

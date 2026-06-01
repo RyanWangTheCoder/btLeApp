@@ -78,7 +78,7 @@ public class SessionCaptureActivity extends AppCompatActivity {
     /** 1300 ms at 2000 Hz, includes ±300 ms MDF padding on each side. */
     private static final int EMG_FATIGUE_BUF_SIZE = 2600;
     private final RingBufferF emgFatigueBuf = new RingBufferF(EMG_FATIGUE_BUF_SIZE);
-    private final ArrayBlockingQueue<FatigueJob> fatigueQueue = new ArrayBlockingQueue<>(1);
+    private final ArrayBlockingQueue<FatigueJob> fatigueQueue = new ArrayBlockingQueue<>(64);
     private Thread fatigueThread;
     private volatile boolean fatigueRunning = false;
     private TextView txtFatigue;
@@ -87,6 +87,8 @@ public class SessionCaptureActivity extends AppCompatActivity {
     private boolean isDemoMode = false;
     private Thread demoThread;
     private volatile boolean demoRunning = false;
+    private int demoSwingCount = 0;
+    private TextView txtDemoBadge;
     private static final float DEMO_SPEED = 4.0f;  // replay at 4× real time
     private static final int  DEMO_EMG_MAGIC = 0x474D4544; // 'DEMG' LE
     private static final int  DEMO_IMU_MAGIC = 0x554D4944; // 'DIMU' LE
@@ -150,6 +152,11 @@ public class SessionCaptureActivity extends AppCompatActivity {
     private volatile boolean frozen = false;
     private volatile float windowSec = 10f;
 
+    // ── Session summary (for SessionSummaryActivity) ────────────────────────
+    private volatile String lastFatigueLevel = "unknown";
+    private volatile double lastMdfDropPct = Double.NaN;
+    private long sessionStartWallMs = 0;
+
     private volatile float imuThreshold = 300f;  // Gyroscope threshold in dps (degrees per second)
     private volatile long lastMarkerUs = 0;
     private static final long MARKER_DEBOUNCE_US = 2_000_000;  // 2 second debounce (aligns with offline + plotter)
@@ -202,6 +209,7 @@ public class SessionCaptureActivity extends AppCompatActivity {
         setContentView(R.layout.activity_capture);
 
         txtStatus = findViewById(R.id.txtStatus);
+        txtDemoBadge = findViewById(R.id.txtDemoBadge);
         txtStats = findViewById(R.id.txtStats);
         txtBattery = findViewById(R.id.txtBattery);
         txtHeartRate = findViewById(R.id.txtHeartRate);
@@ -232,11 +240,15 @@ public class SessionCaptureActivity extends AppCompatActivity {
 
         if (isDemoMode) {
             txtStatus.setText("DEMO — replaying log0305 session (4× speed)");
+            txtDemoBadge.setVisibility(android.view.View.VISIBLE);
             btnStart.setEnabled(false);
             btnStop.setEnabled(true);
             btnStop.setText("Stop Demo");
+            btnStop.setOnClickListener(v -> stopDemoPlayback());
             btnProcessSession.setEnabled(false);
             btnProcessSession.setText("Post-process (live sessions only)");
+            btnProcessSession.setOnClickListener(v ->
+                Toast.makeText(this, "Post-processing works on recorded BLE sessions, not demo.", Toast.LENGTH_SHORT).show());
             startFatigueThread();
             ui.post(uiTick);
             startDemoPlayback();
@@ -330,6 +342,7 @@ public class SessionCaptureActivity extends AppCompatActivity {
         }
 
         recording = true;
+        sessionStartWallMs = System.currentTimeMillis();
         btnProcessSession.setEnabled(false);
         btnStart.setEnabled(false);
         btnStop.setEnabled(true);
@@ -427,6 +440,19 @@ public class SessionCaptureActivity extends AppCompatActivity {
         txtStatus.setText("Saved to: " + (sessionDir != null ? sessionDir.getAbsolutePath() : "(null)"));
         btnProcessSession.setEnabled(sessionDir != null);
         updateStats();
+        launchSummary(markers.snapshot(0, Float.MAX_VALUE, tmk));
+    }
+
+    private void launchSummary(int swingCount) {
+        int durationSec = sessionStartWallMs > 0
+                ? (int) ((System.currentTimeMillis() - sessionStartWallMs) / 1000) : 0;
+        Intent intent = new Intent(this, SessionSummaryActivity.class);
+        intent.putExtra(SessionSummaryActivity.EXTRA_SWING_COUNT, swingCount);
+        intent.putExtra(SessionSummaryActivity.EXTRA_DURATION_SEC, durationSec);
+        intent.putExtra(SessionSummaryActivity.EXTRA_FATIGUE_LEVEL, lastFatigueLevel);
+        intent.putExtra(SessionSummaryActivity.EXTRA_MDF_DROP_PCT,
+                Double.isNaN(lastMdfDropPct) ? -1f : (float) lastMdfDropPct);
+        startActivity(intent);
     }
 
     private void startWorkerThreads() {
@@ -531,6 +557,7 @@ public class SessionCaptureActivity extends AppCompatActivity {
      *   baseline_swings_collected (int)
      */
     private String parseFatigueDisplay(String json) {
+        Log.d(TAG, "parseFatigueDisplay: " + json);
         try {
             JSONObject obj = new JSONObject(json);
             if (obj.has("error")) return "Fatigue: " + obj.getString("error");
@@ -551,6 +578,8 @@ public class SessionCaptureActivity extends AppCompatActivity {
                         "Swing #%d | MDF=%s Hz [baseline %d/20]",
                         swingId, mdfStr, baselineCollected);
             } else {
+                lastFatigueLevel = level;
+                lastMdfDropPct = mdfDropPct;
                 String dropStr = Double.isNaN(mdfDropPct) ? "?"
                         : String.format(Locale.US, "%.1f%%", mdfDropPct);
                 String warn = warning ? " (!)" : "";
@@ -569,14 +598,31 @@ public class SessionCaptureActivity extends AppCompatActivity {
 
     private void startDemoPlayback() {
         demoRunning = true;
+        demoSwingCount = 0;
+        lastFatigueLevel = "unknown";
+        lastMdfDropPct = Double.NaN;
+        sessionStartWallMs = System.currentTimeMillis();
         // Reset Python fatigue monitor before playback begins
         new Thread(() -> {
             try {
                 if (!Python.isStarted()) Python.start(new AndroidPlatform(SessionCaptureActivity.this));
-                Python.getInstance().getModule("analysis_bridge").callAttr("reset_fatigue_monitor");
+                // warmup_skip_min=0: demo asset already starts after electrode settling
+                // baseline_swings=5: sufficient given ~42 swings; some have low RMS
+                Python.getInstance().getModule("analysis_bridge").callAttr(
+                        "reset_fatigue_monitor", 2000.0, 0.0, 5, 12.0, 20.0);
                 ui.post(() -> txtFatigue.setText("Fatigue: monitoring..."));
+                Log.i(TAG, "demo: reset_fatigue_monitor OK (warmup=0, baseline=5)");
             } catch (Exception e) {
                 Log.w(TAG, "demo: reset_fatigue_monitor failed", e);
+                // Retry without Python.start — it may already be running
+                try {
+                    Python.getInstance().getModule("analysis_bridge").callAttr(
+                            "reset_fatigue_monitor", 2000.0, 0.0, 5, 12.0, 20.0);
+                    ui.post(() -> txtFatigue.setText("Fatigue: monitoring..."));
+                    Log.i(TAG, "demo: reset_fatigue_monitor OK on retry");
+                } catch (Exception e2) {
+                    Log.e(TAG, "demo: reset_fatigue_monitor retry also failed", e2);
+                }
             }
         }, "demoFatigueReset").start();
 
@@ -671,6 +717,7 @@ public class SessionCaptureActivity extends AppCompatActivity {
                             if ((peakTimeUs - lastMarkerUs) > MARKER_DEBOUNCE_US) {
                                 float peakTSec = peakTimeUs / 1e6f;
                                 markers.add(peakTSec);
+                                demoSwingCount++;
                                 lastMarkerUs = peakTimeUs;
                                 float[] emgSnap = emgFatigueBuf.snapshotY();
                                 if (emgSnap.length > 0)
@@ -696,11 +743,22 @@ public class SessionCaptureActivity extends AppCompatActivity {
                 }
 
                 if (demoRunning) {
-                    // Reached EOF naturally
+                    // Reached EOF naturally — wait for fatigueQueue to drain before showing summary
+                    final int swings = demoSwingCount;
                     ui.post(() -> {
-                        txtStatus.setText("Demo complete");
+                        txtStatus.setText("Demo complete — " + swings + " swings detected");
+                        txtDemoBadge.setText("● DEMO COMPLETE");
                         btnStop.setEnabled(false);
                     });
+                    // Poll until queue empty (max 10s) then launch summary on UI thread
+                    new Thread(() -> {
+                        long deadline = System.currentTimeMillis() + 10000;
+                        while (System.currentTimeMillis() < deadline) {
+                            if (fatigueQueue.isEmpty()) break;
+                            try { Thread.sleep(200); } catch (InterruptedException ignored) { break; }
+                        }
+                        ui.post(() -> launchSummary(swings));
+                    }, "demoSummaryWait").start();
                 }
             } catch (Exception e) {
                 Log.e(TAG, "demoThread error", e);
@@ -718,6 +776,7 @@ public class SessionCaptureActivity extends AppCompatActivity {
             demoThread = null;
         }
         ui.post(() -> {
+            txtDemoBadge.setVisibility(android.view.View.GONE);
             btnStop.setEnabled(false);
             txtStatus.setText("Demo stopped");
         });

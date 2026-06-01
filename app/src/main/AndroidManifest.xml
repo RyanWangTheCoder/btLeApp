@@ -46,6 +46,11 @@
             android:exported="false"
             android:label="Realtime monitoring" />
 
+        <activity
+            android:name=".capture.SessionSummaryActivity"
+            android:exported="false"
+            android:label="Session Summary" />
+
     </application>
 
 </manifest>
