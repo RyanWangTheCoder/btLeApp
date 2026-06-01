@@ -113,6 +113,12 @@
             android:layout_height="wrap_content"
             android:text="Record" />
 
+        <Button
+            android:id="@+id/btn_demo"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Try Demo" />
+
         <ImageView
             android:id="@+id/img_loading"
             android:layout_width="30dp"

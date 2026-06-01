@@ -9,7 +9,7 @@ android {
 
     defaultConfig {
         ndk {
-            abiFilters 'arm64-v8a', 'x86_64'
+            abiFilters 'arm64-v8a'  // x86_64 only needed for emulator; Play Store uses AAB
         }
         minSdkVersion rootProject.ext.android.minSdkVersion
         targetSdkVersion rootProject.ext.android.targetSdkVersion
@@ -66,7 +66,7 @@ dependencies {
 chaquopy {
     defaultConfig {
         version = '3.10'
-        buildPython "C:/Python310/python.exe"
+        buildPython "/usr/bin/python3.10"
         pip {
             install 'numpy'
             install 'scipy'

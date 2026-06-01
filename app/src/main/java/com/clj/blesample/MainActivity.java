@@ -22,8 +22,6 @@ import android.view.animation.Animation;
 import android.view.animation.AnimationUtils;
 import android.view.animation.LinearInterpolator;
 import android.widget.Button;
-import android.widget.CheckBox;
-import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -70,7 +68,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private LinearLayout layout_setting;
     private TextView txt_setting;
     private Button btn_scan, btn_monitor;
-    private Button btn_process, btn_record;
+    private Button btn_process, btn_record, btn_demo;
     private EditText et_name, et_mac, et_uuid;
     private Switch sw_auto;
     private ImageView img_loading;
@@ -116,32 +114,11 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     }
 
     private Boolean RadioButtonState = false;
-    //private CheckBox checkBox;
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         initView();
-        //checkBox = ( CheckBox ) findViewById( R.id.demoCheckBox );
-/*        checkBox.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener()
-        {
-            @Override
-            public void onCheckedChanged(CompoundButton buttonView, boolean isChecked)
-            {
-                if ( isChecked )
-                {
-                    // perform logic
-                    RadioButtonState = true;
-
-                }
-                else RadioButtonState = false;
-                Log.d("", "checkbox is " + RadioButtonState);
-            }
-        });
-        checkBox = (CheckBox) findViewById(R.id.demoCheckBox); // initiate a radio button
-        checkBox.setText("Demo"); // displayed text of radio button
-
-        checkBox.setChecked(true);*/
 
         BleManager.getInstance().init(getApplication());
         BleManager.getInstance()
@@ -225,6 +202,12 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             startActivity(intent);
         }
 
+        else if (v.getId() == R.id.btn_demo) {
+            Intent intent = new Intent(getApplicationContext(), SessionCaptureActivity.class);
+            intent.putExtra("DEMO_MODE", true);
+            startActivity(intent);
+        }
+
         else if (v.getId() == R.id.txt_setting) {
                 if (layout_setting.getVisibility() == View.VISIBLE) {
                     layout_setting.setVisibility(View.GONE);
@@ -244,7 +227,13 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 return;
             }
             Intent intent = new Intent(getApplicationContext(), SessionCaptureActivity.class);
-            intent.putExtra("bleDevice", mBleDevice);  // SessionCaptureActivity expects "bleDevice"
+            intent.putExtra("bleDevice", mBleDevice);
+            startActivity(intent);
+        }
+
+        else if (v.getId() == R.id.btn_demo) {
+            Intent intent = new Intent(getApplicationContext(), SessionCaptureActivity.class);
+            intent.putExtra("DEMO_MODE", true);
             startActivity(intent);
         }
 
@@ -266,6 +255,9 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         btn_record = (Button) findViewById(R.id.btn_record);
         btn_record.setText("Record");
         btn_record.setOnClickListener(this);
+        btn_demo = (Button) findViewById(R.id.btn_demo);
+        btn_demo.setText("Try Demo");
+        btn_demo.setOnClickListener(this);
         et_name = (EditText) findViewById(R.id.et_name);
         et_mac = (EditText) findViewById(R.id.et_mac);
         et_uuid = (EditText) findViewById(R.id.et_uuid);

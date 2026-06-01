@@ -34,7 +34,9 @@ import com.clj.fastble.exception.BleException;
 
 import org.json.JSONObject;
 
+import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
+import java.io.DataInputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -80,6 +82,15 @@ public class SessionCaptureActivity extends AppCompatActivity {
     private Thread fatigueThread;
     private volatile boolean fatigueRunning = false;
     private TextView txtFatigue;
+
+    // ── Demo mode ───────────────────────────────────────────────────────────
+    private boolean isDemoMode = false;
+    private Thread demoThread;
+    private volatile boolean demoRunning = false;
+    private static final float DEMO_SPEED = 4.0f;  // replay at 4× real time
+    private static final int  DEMO_EMG_MAGIC = 0x474D4544; // 'DEMG' LE
+    private static final int  DEMO_IMU_MAGIC = 0x554D4944; // 'DIMU' LE
+    // ───────────────────────────────────────────────────────────────────────
     // ───────────────────────────────────────────────────────────────────────
 
     private TextView txtStatus;
@@ -217,6 +228,21 @@ public class SessionCaptureActivity extends AppCompatActivity {
             bleDevice = getIntent().getParcelableExtra("bleDevice");
         }
 
+        isDemoMode = getIntent().getBooleanExtra("DEMO_MODE", false);
+
+        if (isDemoMode) {
+            txtStatus.setText("DEMO — replaying log0305 session (4× speed)");
+            btnStart.setEnabled(false);
+            btnStop.setEnabled(true);
+            btnStop.setText("Stop Demo");
+            btnProcessSession.setEnabled(false);
+            btnProcessSession.setText("Post-process (live sessions only)");
+            startFatigueThread();
+            ui.post(uiTick);
+            startDemoPlayback();
+            return;
+        }
+
         if (bleDevice == null) {
             txtStatus.setText("No BLE device. Connect first.");
             btnStart.setEnabled(false);
@@ -226,7 +252,7 @@ public class SessionCaptureActivity extends AppCompatActivity {
         }
 
         btnStart.setOnClickListener(v -> startSession());
-        btnStop.setOnClickListener(v -> stopSession());
+        btnStop.setOnClickListener(v -> { if (isDemoMode) stopDemoPlayback(); else stopSession(); });
         btnStop.setEnabled(false);
 
         btnProcessSession.setEnabled(false);
@@ -538,6 +564,176 @@ public class SessionCaptureActivity extends AppCompatActivity {
     }
 
     // ───────────────────────────────────────────────────────────────────────
+
+    // ── Demo playback ────────────────────────────────────────────────────────
+
+    private void startDemoPlayback() {
+        demoRunning = true;
+        // Reset Python fatigue monitor before playback begins
+        new Thread(() -> {
+            try {
+                if (!Python.isStarted()) Python.start(new AndroidPlatform(SessionCaptureActivity.this));
+                Python.getInstance().getModule("analysis_bridge").callAttr("reset_fatigue_monitor");
+                ui.post(() -> txtFatigue.setText("Fatigue: monitoring..."));
+            } catch (Exception e) {
+                Log.w(TAG, "demo: reset_fatigue_monitor failed", e);
+            }
+        }, "demoFatigueReset").start();
+
+        demoThread = new Thread(() -> {
+            try {
+                // Load both asset files fully into memory before playback
+                int[] emgT_ms; short[] emgRaw; short[] emgEnv;
+                int[] imuT_ms; short[] iAx, iAy, iAz, iGx, iGy, iGz;
+
+                try (DataInputStream dis = new DataInputStream(new BufferedInputStream(
+                        getAssets().open("demo_emg.bin"), 65536))) {
+                    int magic = readInt32LE(dis);
+                    if (magic != DEMO_EMG_MAGIC) throw new IOException("Bad EMG magic: " + magic);
+                    int n = readInt32LE(dis);
+                    emgT_ms = new int[n]; emgRaw = new short[n]; emgEnv = new short[n];
+                    for (int i = 0; i < n; i++) {
+                        emgT_ms[i] = readInt32LE(dis);
+                        emgRaw[i]  = readInt16LE(dis);
+                        emgEnv[i]  = readInt16LE(dis);
+                    }
+                    Log.i(TAG, "Demo EMG loaded: " + n + " samples");
+                }
+
+                try (DataInputStream dis = new DataInputStream(new BufferedInputStream(
+                        getAssets().open("demo_imu.bin"), 65536))) {
+                    int magic = readInt32LE(dis);
+                    if (magic != DEMO_IMU_MAGIC) throw new IOException("Bad IMU magic: " + magic);
+                    int n = readInt32LE(dis);
+                    imuT_ms = new int[n];
+                    iAx = new short[n]; iAy = new short[n]; iAz = new short[n];
+                    iGx = new short[n]; iGy = new short[n]; iGz = new short[n];
+                    for (int i = 0; i < n; i++) {
+                        imuT_ms[i] = readInt32LE(dis);
+                        iAx[i] = readInt16LE(dis); iAy[i] = readInt16LE(dis); iAz[i] = readInt16LE(dis);
+                        iGx[i] = readInt16LE(dis); iGy[i] = readInt16LE(dis); iGz[i] = readInt16LE(dis);
+                    }
+                    Log.i(TAG, "Demo IMU loaded: " + n + " samples");
+                }
+
+                // Merge-playback: walk both streams in t_ms order
+                // EMG at 2000 Hz, IMU at 200 Hz — interleave by timestamp
+                final float ACCEL_SCALE_INV = 1.0f / 1000.0f; // milli-g → g
+                final float GYRO_SCALE_INV  = 1.0f / 10.0f;   // 0.1 dps → dps
+
+                int ei = 0, ii = 0;
+                int nEmg = emgT_ms.length, nImu = imuT_ms.length;
+                long wallStart = System.currentTimeMillis();
+                long dataStart = Math.min(emgT_ms[0], imuT_ms[0]); // both start ~0
+
+                t0SessionUs = 0;
+
+                while (demoRunning && (ei < nEmg || ii < nImu)) {
+                    // Pick whichever stream has the earlier timestamp
+                    boolean doEmg = (ii >= nImu) ||
+                            (ei < nEmg && emgT_ms[ei] <= imuT_ms[ii]);
+
+                    if (doEmg) {
+                        float tSec = emgT_ms[ei] / 1000.0f;
+                        float raw  = emgRaw[ei];
+                        float env  = emgEnv[ei];
+
+                        emgFatigueBuf.add(tSec, raw);
+                        emgRawBuf.add(tSec, raw);
+                        emgEnvBuf.add(tSec, env);
+                        rawDcLpf = rawDcLpf + rawDcAlpha * (raw - rawDcLpf);
+                        float x = Math.abs(raw - rawDcLpf);
+                        envLpf = envLpf + envAlpha * (x - envLpf);
+                        emgFiltBuf.add(tSec, envLpf);
+                        ei++;
+                    } else {
+                        float tSec = imuT_ms[ii] / 1000.0f;
+                        float ax = iAx[ii] * ACCEL_SCALE_INV;
+                        float ay = iAy[ii] * ACCEL_SCALE_INV;
+                        float az = iAz[ii] * ACCEL_SCALE_INV;
+                        float gxDps = iGx[ii] * GYRO_SCALE_INV;
+                        float gyDps = iGy[ii] * GYRO_SCALE_INV;
+                        float gzDps = iGz[ii] * GYRO_SCALE_INV;
+
+                        float amag = (float) Math.sqrt(ax*ax + ay*ay + az*az) * 8192f; // back to ~LSB scale for plot
+                        float gmag_dps = (float) Math.sqrt(gxDps*gxDps + gyDps*gyDps + gzDps*gzDps);
+                        imuBuf.add(tSec, amag);
+
+                        // Swing peak detection (mirrors live path)
+                        long devUs = (long)(tSec * 1e6f);
+                        if (gmag_dps >= imuThreshold) {
+                            if (!inPeak) {
+                                inPeak = true; peakGyroMag = gmag_dps; peakTimeUs = devUs;
+                            } else if (gmag_dps > peakGyroMag) {
+                                peakGyroMag = gmag_dps; peakTimeUs = devUs;
+                            }
+                        } else if (inPeak) {
+                            if ((peakTimeUs - lastMarkerUs) > MARKER_DEBOUNCE_US) {
+                                float peakTSec = peakTimeUs / 1e6f;
+                                markers.add(peakTSec);
+                                lastMarkerUs = peakTimeUs;
+                                float[] emgSnap = emgFatigueBuf.snapshotY();
+                                if (emgSnap.length > 0)
+                                    fatigueQueue.offer(new FatigueJob(emgSnap, peakTSec * 1000f, peakGyroMag));
+                            }
+                            inPeak = false; peakGyroMag = 0f;
+                        }
+                        lastGyroMag = gmag_dps;
+                        ii++;
+                    }
+
+                    // Pace playback: sleep to match real-time data rate / DEMO_SPEED
+                    // Check every 200 EMG samples (~0.1s of data) to avoid constant sleep overhead
+                    if (doEmg && (ei % 200) == 0) {
+                        long dataElapsedMs = (ei < nEmg ? emgT_ms[ei] : emgT_ms[nEmg-1]) - dataStart;
+                        long wallElapsedMs = System.currentTimeMillis() - wallStart;
+                        long targetWallMs  = (long)(dataElapsedMs / DEMO_SPEED);
+                        long sleepMs = targetWallMs - wallElapsedMs;
+                        if (sleepMs > 2) {
+                            try { Thread.sleep(sleepMs); } catch (InterruptedException e) { break; }
+                        }
+                    }
+                }
+
+                if (demoRunning) {
+                    // Reached EOF naturally
+                    ui.post(() -> {
+                        txtStatus.setText("Demo complete");
+                        btnStop.setEnabled(false);
+                    });
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "demoThread error", e);
+                ui.post(() -> txtStatus.setText("Demo error: " + e.getMessage()));
+            }
+        }, "demoThread");
+        demoThread.start();
+    }
+
+    private void stopDemoPlayback() {
+        demoRunning = false;
+        if (demoThread != null) {
+            demoThread.interrupt();
+            try { demoThread.join(500); } catch (InterruptedException ignored) {}
+            demoThread = null;
+        }
+        ui.post(() -> {
+            btnStop.setEnabled(false);
+            txtStatus.setText("Demo stopped");
+        });
+    }
+
+    private static int readInt32LE(DataInputStream dis) throws IOException {
+        int b0 = dis.read(), b1 = dis.read(), b2 = dis.read(), b3 = dis.read();
+        return (b0 & 0xFF) | ((b1 & 0xFF) << 8) | ((b2 & 0xFF) << 16) | ((b3 & 0xFF) << 24);
+    }
+
+    private static short readInt16LE(DataInputStream dis) throws IOException {
+        int b0 = dis.read(), b1 = dis.read();
+        return (short)((b0 & 0xFF) | ((b1 & 0xFF) << 8));
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
 
     private void startPingTimer() {
         stopPingTimer();
@@ -873,48 +1069,35 @@ public class SessionCaptureActivity extends AppCompatActivity {
             float amag = (float)Math.sqrt((double)ax*ax + (double)ay*ay + (double)az*az);
             
             // Calculate gyroscope magnitude for swing detection
-            float gmag = (float)Math.sqrt((double)gx*gx + (double)gy*gy + (double)gz*gz);
-            float gmag_dps = gmag / GYRO_SCALE_FACTOR;  // Convert to degrees per second
+            float gmag_dps = (float)Math.sqrt((double)gx*gx + (double)gy*gy + (double)gz*gz)
+                             / GYRO_SCALE_FACTOR;
 
             // Plot accelerometer magnitude (for visual reference)
             imuBuf.add(tSec, amag);
-            
-            // Peak detection: only trigger on the HIGHEST point of the swing
-            // This prevents double-counting backswing + forward swing
-            if (gmag_dps >= imuThreshold) {
-                if (!inPeak) {
-                    // Start of new peak
-                    inPeak = true;
-                    peakGyroMag = gmag_dps;
-                    peakTimeUs = devUs;
-                } else {
-                    // Already in peak - update if this is higher
-                    if (gmag_dps > peakGyroMag) {
-                        peakGyroMag = gmag_dps;
-                        peakTimeUs = devUs;
-                    }
-                }
-            } else if (inPeak) {
-                // Dropped below threshold - end of peak
-                // Trigger detection at the peak point (if debounce allows)
-                if ((peakTimeUs - lastMarkerUs) > MARKER_DEBOUNCE_US) {
-                    float peakTSec = (peakTimeUs - t0SessionUs) / 1_000_000f;
-                    markers.add(peakTSec);
-                    lastMarkerUs = peakTimeUs;
 
-                    // Snapshot EMG at peak time
-                    float[] emgSnap = emgFatigueBuf.snapshotY();
-                    if (emgSnap.length > 0) {
-                        float tPeakMs = peakTSec * 1000f;
-                        fatigueQueue.offer(new FatigueJob(emgSnap, tPeakMs, peakGyroMag));
-                    }
-                }
-                inPeak = false;
-                peakGyroMag = 0f;
-            }
-            
-            lastGyroMag = gmag_dps;
+            detectSwingPeak(tSec, gmag_dps, devUs);
         }
+    }
+
+    private void detectSwingPeak(float tSec, float gmag_dps, long devUs) {
+        if (gmag_dps >= imuThreshold) {
+            if (!inPeak) {
+                inPeak = true; peakGyroMag = gmag_dps; peakTimeUs = devUs;
+            } else if (gmag_dps > peakGyroMag) {
+                peakGyroMag = gmag_dps; peakTimeUs = devUs;
+            }
+        } else if (inPeak) {
+            if ((peakTimeUs - lastMarkerUs) > MARKER_DEBOUNCE_US) {
+                float peakTSec = peakTimeUs / 1_000_000f;
+                markers.add(peakTSec);
+                lastMarkerUs = peakTimeUs;
+                float[] emgSnap = emgFatigueBuf.snapshotY();
+                if (emgSnap.length > 0)
+                    fatigueQueue.offer(new FatigueJob(emgSnap, peakTSec * 1000f, peakGyroMag));
+            }
+            inPeak = false; peakGyroMag = 0f;
+        }
+        lastGyroMag = gmag_dps;
     }
 
     private void renderPlots() {
@@ -1122,7 +1305,9 @@ public class SessionCaptureActivity extends AppCompatActivity {
     protected void onDestroy() {
         super.onDestroy();
         ui.removeCallbacks(uiTick);
+        stopDemoPlayback();
         stopFatigueThread();
+        stopDemoPlayback();
         stopWatchdog();
         cancelReconnect();
         stopSession();

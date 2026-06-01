@@ -258,21 +258,90 @@ Android Studio should automatically detect the submodule. However, if you see Py
 
 ## Building and Installing the Android App
 
+### Platform options
+
+| | Windows | Linux SSH remote |
+|---|---|---|
+| Build tool | `.\gradlew assembleDebug` | `./gradlew assembleDebug` |
+| APK path | `app\build\outputs\apk\debug\app-debug.apk` | `app/build/outputs/apk/debug/app-debug.apk` |
+| ADB install path | `C:\wangx\ftc\btLeApp\...\app-debug.apk` | `H:\projects\btLeApp\...\app-debug.apk` (H: = Linux workspace mounted on Windows) |
+
+---
+
+### Linux SSH remote — one-time environment setup
+
+The Linux build environment is at `/local/mnt/workspace/wangx/android-sdk`.
+These are already configured; listed here for reference if you need to rebuild from scratch.
+
+**Android SDK** (installed at `/local/mnt/workspace/wangx/android-sdk`):
+- `platforms;android-34`
+- `build-tools;34.0.0`
+- `ndk;25.2.9519653`
+- `platform-tools` (adb)
+
+**`~/.bashrc`** — env vars (already added):
+```bash
+export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+export PATH=$JAVA_HOME/bin:$PATH
+export ANDROID_HOME=/local/mnt/workspace/wangx/android-sdk
+export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH
+```
+
+**`local.properties`** in project root (already present):
+```
+sdk.dir=/local/mnt/workspace/wangx/android-sdk
+```
+
+**`app/build.gradle`** — `buildPython` (already set):
+```groovy
+buildPython "/usr/bin/python3.10"
+```
+
+To reinstall SDK from scratch:
+```bash
+mkdir -p /local/mnt/workspace/wangx/android-sdk/cmdline-tools
+cd /tmp
+curl -L -o commandlinetools.zip https://dl.google.com/android/repository/commandlinetools-linux-14742923_latest.zip
+unzip -q commandlinetools.zip -d /local/mnt/workspace/wangx/android-sdk/cmdline-tools
+mv /local/mnt/workspace/wangx/android-sdk/cmdline-tools/cmdline-tools \
+   /local/mnt/workspace/wangx/android-sdk/cmdline-tools/latest
+PATH=/bin:/usr/bin bash -c 'yes | ANDROID_HOME=/local/mnt/workspace/wangx/android-sdk \
+  /local/mnt/workspace/wangx/android-sdk/cmdline-tools/latest/bin/sdkmanager \
+  --sdk_root=/local/mnt/workspace/wangx/android-sdk --licenses'
+PATH=/bin:/usr/bin JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 bash -c \
+  'ANDROID_HOME=/local/mnt/workspace/wangx/android-sdk \
+  /local/mnt/workspace/wangx/android-sdk/cmdline-tools/latest/bin/sdkmanager \
+  --sdk_root=/local/mnt/workspace/wangx/android-sdk \
+  "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;25.2.9519653"'
+```
+
+---
+
 ### 1. Build the APK
 
-To build the debug APK using Gradle:
-
+**Windows:**
 ```bash
 cd C:\wangx\ftc\btLeApp
 .\gradlew assembleDebug
 ```
 
+**Linux SSH remote** (open a new terminal after setting up env above):
+```bash
+cd /local/mnt/workspace/wangx/projects/btLeApp
+./gradlew assembleDebug
+```
+
 **What this does:**
-- Compiles Java/Kotlin code
-- Packages Python files (including submodule)
+- Compiles Java code
+- Packages Python files via Chaquopy (includes `emg_util` submodule, numpy, scipy)
 - Creates debug APK at: `app/build/outputs/apk/debug/app-debug.apk`
 
-**Build time:** ~30-60 seconds (first build may take longer)
+**Build time:** ~2–5 min first build (Chaquopy downloads Python runtime); ~30–60 s incremental.
+
+**APK size note:** `arm64-v8a` only (debug) ≈ 60–80 MB. Both ABIs would double that.
+For Play Store, use `./gradlew bundleRelease` (`.aab`) — Play handles per-device ABI splits.
+
+---
 
 ### 2. Install on Android Device
 
@@ -280,6 +349,13 @@ cd C:\wangx\ftc\btLeApp
 - Enable USB debugging on your Android device
 - Connect device via USB
 - Verify connection: `adb devices`
+
+#### Check device Android version
+```bash
+adb shell getprop ro.build.version.release
+```
+Must be ≥ 7.0 (API 24). Android 9 (API 28) is fully supported for testing.
+Note: Android 12+ BLE permission behavior differs — test on a newer device before Play Store submission.
 
 #### Installation Commands
 
@@ -291,8 +367,11 @@ If you get a signature mismatch error, uninstall the old version first:
 # Uninstall old version
 adb uninstall com.clj.blesample
 
-# Install new APK
+# Install — built on Windows
 adb install C:\wangx\ftc\btLeApp\app\build\outputs\apk\debug\app-debug.apk
+
+# Install — built on Linux remote (workspace mounted as H: on Windows)
+adb install H:\projects\btLeApp\app\build\outputs\apk\debug\app-debug.apk
 ```
 
 **Option B: Update Install**
@@ -304,6 +383,10 @@ adb install -r C:\wangx\ftc\btLeApp\app\build\outputs\apk\debug\app-debug.apk
 ```
 
 The `-r` flag replaces the existing app without uninstalling.
+
+**Install speed:** APK is ~60–80 MB — expect 1–3 min over USB. `Performing Streamed Install` at the start is normal; wait for `Success`.
+
+---
 
 ### 3. Troubleshooting Installation
 
@@ -346,33 +429,40 @@ adb devices
 3. Accept "Allow USB debugging" prompt on device
 4. Run `adb devices` to verify
 
+---
+
 ### 4. Complete Build & Install Workflow
 
+**Windows:**
 ```bash
-# 1. Navigate to project directory
 cd C:\wangx\ftc\btLeApp
-
-# 2. Ensure submodule is initialized
 git submodule update --init --recursive
-
-# 3. Build the APK
 .\gradlew assembleDebug
-
-# 4. Verify device connection
 adb devices
-
-# 5. Uninstall old version (if needed)
 adb uninstall com.clj.blesample
-
-# 6. Install new APK
 adb install app\build\outputs\apk\debug\app-debug.apk
 ```
+
+**Linux SSH remote:**
+```bash
+cd /local/mnt/workspace/wangx/projects/btLeApp
+git submodule update --init --recursive
+./gradlew assembleDebug
+# Then on Windows (H: = Linux workspace):
+# adb uninstall com.clj.blesample
+# adb install H:\projects\btLeApp\app\build\outputs\apk\debug\app-debug.apk
+```
+
+---
 
 ### 5. Verify Installation
 
 After installation, verify the app is working:
 
 ```bash
+# Check Android version on device (must be ≥ 7.0 / API 24)
+adb shell getprop ro.build.version.release
+
 # Check if app is installed
 adb shell pm list packages | findstr blesample
 
@@ -382,6 +472,54 @@ adb shell am start -n com.clj.blesample/.MainActivity
 # Monitor logs
 adb logcat -s SessionCapture:* ProcessingActivity:*
 ```
+
+---
+
+## Play Store Release — Open Testing Track
+
+### Why Open Testing?
+- Publicly accessible via link (not search-discoverable)
+- Google runs a **pre-launch report** on real Android 12/13/14 devices automatically — no need to own those devices
+- Free; no review required to start
+
+### One-time setup (do once)
+1. Create a Google Play Console account at play.google.com/console (~$25 one-time fee)
+2. Create a new app → set up store listing (name, description, screenshots)
+3. Go to **Setup → App signing** — let Play manage the signing key
+
+### Build a release AAB (not APK)
+
+Play Store requires an `.aab` (App Bundle), not an `.apk`. The bundle lets Play split by ABI/language per device — so `x86_64` comes back automatically for emulators without bloating the download.
+
+**Windows:**
+```bash
+cd C:\wangx\ftc\btLeApp
+.\gradlew bundleRelease
+```
+
+**Linux SSH remote:**
+```bash
+cd /local/mnt/workspace/wangx/projects/btLeApp
+./gradlew bundleRelease
+```
+
+Output: `app/build/outputs/bundle/release/app-release.aab`
+
+### Upload to Play Console
+1. Play Console → your app → **Testing → Open testing**
+2. Create a new release → upload `app-release.aab`
+3. Play will show a **pre-launch report** within ~1 hour covering:
+   - Crashes on Android 9 / 12 / 13 / 14 real devices
+   - BLE permission behavior on Android 12+ (this is what we're testing for)
+   - ANR (app not responding) issues
+4. Fix any flagged issues, rebuild, re-upload
+
+### BLE permissions — what to expect in the report
+The manifest now declares both old (`BLUETOOTH`/`BLUETOOTH_ADMIN`) and new (`BLUETOOTH_SCAN`/`BLUETOOTH_CONNECT`) permissions:
+- **Android ≤ 11**: uses `BLUETOOTH` + `BLUETOOTH_ADMIN` + Location (current behavior, no change)
+- **Android 12+**: uses `BLUETOOTH_SCAN` + `BLUETOOTH_CONNECT`; `neverForLocation` flag avoids the location permission prompt for BLE scanning
+
+If the pre-launch report flags a crash on Android 12+ in `MainActivity.checkPermissions()`, it's because the runtime permission request for `BLUETOOTH_SCAN`/`BLUETOOTH_CONNECT` is not yet wired. That Java-side change is a Phase 5 (Play Store Readiness) task.
 
 ---
 
