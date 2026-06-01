@@ -5,3 +5,4 @@
 build
 app/src/main/python/__pycache__/
 release.keystore
+.env
