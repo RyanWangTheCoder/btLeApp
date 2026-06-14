@@ -30,7 +30,7 @@
     </LinearLayout>
 
     <!-- sparkline: MDF drop % trend -->
-    <com.clj.blesample.capture.TrendSparklineView
+    <com.musclelogic.athlete.capture.TrendSparklineView
         android:id="@+id/sparkline"
         android:layout_width="match_parent"
         android:layout_height="140dp"

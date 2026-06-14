@@ -243,7 +243,82 @@ Session history screen opens from both MainActivity and SessionSummaryActivity; 
 
 ---
 
-## 2026-05-31 (continued) — Linux build environment setup
+## 2026-06-01 (continued) — Phase 4 release build prep
+
+### Work completed
+
+**Keystore + signingConfigs:**
+- `app/build.gradle`: `signingConfigs.release` reads `../release.keystore` + env vars
+  (`KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`); `minifyEnabled true` with
+  `proguard-android-optimize.txt`
+- Bug fixed: `signingConfigs` block must appear **before** `buildTypes` in Gradle —
+  initial ordering caused "Could not get unknown property 'release'" at evaluation time
+- `.gitignore`: added `release.keystore` and `.env`
+- `.env.example`: template showing the three env vars needed for `bundleRelease`
+
+**ProGuard rules (`proguard-rules.pro`):**
+- Keep rules for Chaquopy, FastBLE, `capture.*`, `processing.*` packages
+- `-dontwarn` for AndroidX and FastBLE
+
+**Android 12+ runtime Bluetooth permissions:**
+- `MainActivity.checkPermissions()`: on API 31+ requests `BLUETOOTH_SCAN` +
+  `BLUETOOTH_CONNECT` first (new `REQUEST_CODE_PERMISSION_BLUETOOTH = 3`); falls
+  through to existing location/scan flow once granted
+- `onRequestPermissionsResult`: new `case REQUEST_CODE_PERMISSION_BLUETOOTH` calls
+  `checkPermissions()` again to continue the flow
+
+**Cleanup:**
+- Removed `Log.d(TAG, "parseFatigueDisplay: " + json)` from `SessionCaptureActivity`
+
+**Release AAB built and ready:**
+- `source .env && java -cp gradle/wrapper/gradle-wrapper.jar org.gradle.wrapper.GradleWrapperMain bundleRelease`
+- Output: `app/build/outputs/bundle/release/app-release.aab`
+
+**512×512 Play Store icon:**
+- `tools/make_icon.py`: generates `app-icon-512.png` using PIL — navy background +
+  white monitor_heart waveform glyph; no external dependencies beyond Pillow
+
+### Commits
+- `e282a9c` — Release build prep: signing, ProGuard, Android 12+ BT permissions
+- `48bec58` — Add .env.example for release signing and gitignore .env
+
+### Remaining before Play Store submission (manual)
+1. Upload `privacy_policy.html` to safestrongsport.org; note the final URL
+2. Update `privacy_policy_url` string in `strings.xml` to match
+3. Run `keytool -genkey` to generate `release.keystore` (keep safe — loss = can't update app)
+4. Upload `app-release.aab` to Play Console → Open Testing track
+5. Fill store listing: description, screenshots, privacy policy URL
+
+---
+
+## 2026-06-14 — Play Store submission: store assets, manifest fixes, release builds
+
+### Store assets created (`app/store_assets/`)
+
+- `icon_512.png` (512×512) — teal background, white "M" monogram with EMG pulse line, "MuscleLogic" label
+- `feature_graphic_1024x500.png` (1024×500) — teal/dark-teal split, "MuscleLogic" title, "EMG / IMU Tracking" tagline, ECG pulse decoration
+- Generated with PIL (`python3`); fonts: Ubuntu Bold + Open Sans Light
+
+### Manifest fixes
+
+- Added `<supports-screens>` with `largeScreens=false` / `xlargeScreens=false` to declare phone-only support and suppress Play Console tablet screenshot requirement
+- Removed `MANAGE_EXTERNAL_STORAGE`, `READ_EXTERNAL_STORAGE`, `WRITE_EXTERNAL_STORAGE` permissions — not needed; app writes to `getExternalFilesDir(null)` which requires no permission
+- `SensorDataFile.java`: switched from `Environment.getExternalStoragePublicDirectory(DIRECTORY_DOWNLOADS)` to `context.getExternalFilesDir(null)` — files now at `/sdcard/Android/data/com.musclelogic.athlete/files/` instead of `Downloads/`
+
+### Release builds
+
+| versionCode | Track | Notes |
+|-------------|-------|-------|
+| 242 | Internal testing | First Play Store upload |
+| 243 | Closed testing | Separate track upload |
+| 244 | Closed testing | Storage permission removal + manifest phone-only fix |
+
+### Release notes (en-US, used for 242/243)
+> Initial beta release of MuscleLogic — EMG/IMU muscle fatigue tracking app.
+> Real-time EMG and IMU data capture via BLE, fatigue monitoring with median frequency analysis,
+> session history and swing detection. Optimized for phone use.
+
+
 
 ### Context
 Moved Android development from Windows/Android Studio to VSCode SSH remote on Linux.

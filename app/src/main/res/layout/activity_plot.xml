@@ -40,7 +40,7 @@
                 android:padding="8dp"
                 android:background="#E0E0E0"/>
 
-            <com.clj.blesample.operation.EmgView
+            <com.musclelogic.athlete.operation.EmgView
                 android:layout_width="match_parent"
                 android:layout_height="200dp"/>
 
@@ -54,7 +54,7 @@
                 android:padding="8dp"
                 android:background="#E0E0E0"/>
 
-            <com.clj.blesample.operation.FeaturePlotView
+            <com.musclelogic.athlete.operation.FeaturePlotView
                 android:id="@+id/featurePlotView"
                 android:layout_width="match_parent"
                 android:layout_height="200dp"

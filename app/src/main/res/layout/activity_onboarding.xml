@@ -24,7 +24,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Athlete EMG"
+            android:text="MuscleLogic"
             android:textColor="#FFFFFFFF"
             android:textSize="28sp"
             android:textStyle="bold"
@@ -52,7 +52,7 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Athlete EMG measures forearm muscle fatigue in real time while you play. It tracks EMG (muscle electrical activity) and detects swing events, then tells you when to rest — before your form breaks down."
+            android:text="MuscleLogic measures forearm muscle fatigue in real time while you play. It tracks EMG (muscle electrical activity) and detects swing events, then tells you when to rest — before your form breaks down."
             android:textColor="#DDFFFFFF"
             android:textSize="14sp"
             android:lineSpacingMultiplier="1.5"

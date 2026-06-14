@@ -156,13 +156,13 @@
         android:textStyle="bold"
         android:text="Fatigue: --" />
 
-    <com.clj.blesample.views.SimplePlotView
+    <com.musclelogic.athlete.views.SimplePlotView
         android:id="@+id/emgPlot"
         android:layout_width="match_parent"
         android:layout_height="210dp"
         android:layout_marginTop="8dp" />
 
-    <com.clj.blesample.views.SimplePlotView
+    <com.musclelogic.athlete.views.SimplePlotView
         android:id="@+id/imuPlot"
         android:layout_width="match_parent"
         android:layout_height="210dp"

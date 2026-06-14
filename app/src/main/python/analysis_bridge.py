@@ -42,7 +42,7 @@ def process_session_compat(session_dir: Optional[str] = None) -> str:
     if session_dir is None or session_dir == "":
         # No session specified - return available sessions
         # Use default Android captures directory
-        captures_dir = "/storage/emulated/0/Android/data/com.clj.blesample/files"
+        captures_dir = "/storage/emulated/0/Android/data/com.musclelogic.athlete/files"
         return discover_sessions(captures_dir)
     
     # Android session structure: session_YYYYMMDD_HHMMSS/frames_*.bin (or legacy frames.bin)
@@ -119,7 +119,7 @@ def run_demo() -> str:
         JSON string with available sessions
     """
     # Use default Android captures directory
-    captures_dir = "/storage/emulated/0/Android/data/com.clj.blesample/files/captures"
+    captures_dir = "/storage/emulated/0/Android/data/com.musclelogic.athlete/files/captures"
     
     try:
         sessions_json = discover_sessions(captures_dir)

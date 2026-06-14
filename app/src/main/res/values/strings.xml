@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Athlete EMG</string>
+    <string name="app_name">MuscleLogic</string>
 
     <!-- Permission rationale strings (shown in system dialogs / onboarding) -->
     <string name="perm_bt_scan_rationale">Bluetooth scanning is needed to find your EMG sensor.</string>
@@ -7,11 +7,11 @@
     <string name="perm_location_rationale">Location permission is required by Android to scan for Bluetooth devices nearby.</string>
 
     <!-- Privacy policy -->
-    <string name="privacy_policy_url">https://www.safestrongsport.org/athlete-emg-privacy</string>
+    <string name="privacy_policy_url">https://www.safestrongsport.org/musclelogic-privacy</string>
     <string name="privacy_policy_text">
-ATHLETE EMG — PRIVACY POLICY\n
+MUSCLELOGIC — PRIVACY POLICY\n
 Last updated: June 2026\n\n
-Athlete EMG is developed by SafeStrongSport, a 501(c)(3) non-profit organization (EIN 99-2750707).\n\n
+MuscleLogic is developed by SafeStrongSport, a 501(c)(3) non-profit organization (EIN 99-2750707).\n\n
 WHAT DATA WE COLLECT\n
 The app collects EMG (electromyography) and IMU (motion) sensor data from a Bluetooth LE wearable device worn on your forearm during tennis sessions. This data is used solely to compute forearm muscle fatigue metrics on your device.\n\n
 STORAGE\n
