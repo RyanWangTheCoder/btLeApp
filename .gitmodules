@@ -1,3 +1,6 @@
 [submodule "app/src/main/python/emg_util"]
 	path = app/src/main/python/emg_util
 	url = ../emg_util
+[submodule "arduino"]
+	path = arduino
+	url = ../arduino
